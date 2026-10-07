@@ -23,6 +23,8 @@ from frappe.utils import add_days, date_diff, flt, getdate
 KSA_METHOD = "KSA Labor Law"
 EXCLUDE_RELIEVING = "Exclude once Relieving Date is set"
 INCLUDE_UNTIL_RELIEVING = "Include until Relieving Date"
+SUM_OF_SLABS = "Sum of all previous slabs"
+AS_PER_RULE = "As per Gratuity Rule"
 
 
 # ------------------------------------------------------------------ settings / rule
@@ -62,6 +64,7 @@ def load_rule(rule_name):
 
 	return frappe._dict(
 		name=rule.name,
+		based_on=rule.calculate_gratuity_amount_based_on or SUM_OF_SLABS,
 		method=rule.work_experience_calculation_function or "",
 		days_per_year=flt(rule.total_working_days_per_year) or 365.25,
 		min_years=flt(rule.minimum_year_for_gratuity),
@@ -104,10 +107,23 @@ def service_text(service_days, basis):
 	return f"{service_days / basis:.4f} سنة"
 
 
-def get_weighted_days(service_days, basis, years, rule):
-	"""مجموع (أيام كل شريحة × نسبتها). المستحق = الأجر × weighted ÷ basis"""
+def get_weighted_days(service_days, basis, years, rule, slab_mode=None):
+	"""مجموع (أيام كل شريحة × نسبتها). المستحق = الأجر × weighted ÷ basis
+
+	slab_mode:
+	  - Sum of all previous slabs (الافتراضي): كل شريحة بتاخد سنينها بس × نسبتها
+	  - As per Gratuity Rule: زي حقل Calculate Gratuity Amount Based On في الـ Rule
+	    (لو Current Slab: كل المدة × نسبة الشريحة اللي الموظف واقف فيها، زي HRMS)"""
 	if years < rule.min_years:
 		return 0, []
+
+	based_on = rule.based_on if slab_mode == AS_PER_RULE else SUM_OF_SLABS
+	if based_on == "Current Slab":
+		for s in rule.slabs:
+			if s.from_year <= years < s.to_year:
+				return service_days * s.fraction, [(s, service_days)]
+		return 0, []
+
 	weighted = 0
 	parts = []
 	for s in rule.slabs:
@@ -315,7 +331,7 @@ def compute_employees(
 
 		deduct = unpaid.get(e.name, 0)
 		service_days, basis, years, text = get_service(e.date_of_joining, e.calc_date, rule, deduct)
-		weighted, parts = get_weighted_days(service_days, basis, years, rule)
+		weighted, parts = get_weighted_days(service_days, basis, years, rule, settings.get("slab_calculation"))
 		earnings = flt(sum(sal["components"].values()), 2)
 		total_eosb = flt(earnings * weighted / basis, 2)
 		per_component = distribute(total_eosb, sal["components"])

@@ -14,6 +14,7 @@ bench restart
 ## الإعداد (مرة واحدة)
 1. **EOSB Provision Settings**
    - Gratuity Rule: الـ Rule اللي هتتحسب بيها (المكونات، الشرائح، عدد الأيام، طريقة Work Experience، أنواع الإجازات).
+   - Slab Calculation: `Sum of all previous slabs` (الافتراضي) أو `As per Gratuity Rule` (زي Calculate Gratuity Amount Based On في الـ Rule).
    - Employees with Relieving Date: `Exclude` (أول ما يتحط تاريخ ترك المخصص بيقف) أو `Include until Relieving Date`.
    - Deduct Absent / Leave Without Pay Days: يخصم أيام الغياب والإجازات بدون أجر من مدة الخدمة.
    - Company Accounts: لكل شركة حساب مصروف ومخصص الإجازات، و Cost Center، وحسابات نهاية خدمة افتراضية (اختياري).
