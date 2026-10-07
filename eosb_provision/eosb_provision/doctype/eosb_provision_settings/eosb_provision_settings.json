@@ -1,0 +1,180 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "calculation_section",
+  "gratuity_rule",
+  "work_experience_method",
+  "total_working_days_per_year",
+  "minimum_year_for_gratuity",
+  "column_break_calc",
+  "ksa_day_count",
+  "days_in_month",
+  "posting_section",
+  "include_leave_provision",
+  "submit_journal_entry",
+  "company_accounts",
+  "auto_section",
+  "auto_create",
+  "frequency"
+ ],
+ "fields": [
+  {
+   "fieldname": "calculation_section",
+   "fieldtype": "Section Break",
+   "label": "Calculation"
+  },
+  {
+   "fieldname": "gratuity_rule",
+   "fieldtype": "Link",
+   "label": "Gratuity Rule",
+   "options": "Gratuity Rule",
+   "reqd": 1,
+   "description": "كل الحسبة منها: المكونات، والشرائح، وطريقة Work Experience، وعدد الأيام، وأنواع الإجازات"
+  },
+  {
+   "fieldname": "work_experience_method",
+   "fieldtype": "Data",
+   "label": "Work Experience Method",
+   "read_only": 1,
+   "fetch_from": "gratuity_rule.work_experience_calculation_function"
+  },
+  {
+   "fieldname": "total_working_days_per_year",
+   "fieldtype": "Float",
+   "label": "Total working Days Per Year",
+   "read_only": 1,
+   "fetch_from": "gratuity_rule.total_working_days_per_year"
+  },
+  {
+   "fieldname": "minimum_year_for_gratuity",
+   "fieldtype": "Int",
+   "label": "Minimum Year for Gratuity",
+   "read_only": 1,
+   "fetch_from": "gratuity_rule.minimum_year_for_gratuity"
+  },
+  {
+   "fieldname": "column_break_calc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ksa_day_count",
+   "fieldtype": "Select",
+   "label": "KSA Labor Law Day Count",
+   "options": "30/360 (inclusive)\nActual Days / Total working Days Per Year",
+   "default": "30/360 (inclusive)",
+   "description": "بيستخدم بس لو طريقة الـ Rule = KSA Labor Law. باقي الطرق بتقسم الأيام الفعلية على Total working Days Per Year"
+  },
+  {
+   "fieldname": "days_in_month",
+   "fieldtype": "Int",
+   "label": "Days in Month (Leave Day Salary)",
+   "default": "30"
+  },
+  {
+   "fieldname": "posting_section",
+   "fieldtype": "Section Break",
+   "label": "Posting"
+  },
+  {
+   "fieldname": "include_leave_provision",
+   "fieldtype": "Check",
+   "label": "Include Leave Balance Provision",
+   "default": "1"
+  },
+  {
+   "fieldname": "submit_journal_entry",
+   "fieldtype": "Check",
+   "label": "Submit Journal Entry Automatically",
+   "default": "0",
+   "description": "لو مش متعلم عليه القيد بيتعمل Draft"
+  },
+  {
+   "fieldname": "company_accounts",
+   "fieldtype": "Table",
+   "label": "Company Accounts",
+   "options": "EOSB Company Account"
+  },
+  {
+   "fieldname": "auto_section",
+   "fieldtype": "Section Break",
+   "label": "Auto Create"
+  },
+  {
+   "fieldname": "auto_create",
+   "fieldtype": "Check",
+   "label": "Auto Create Provision",
+   "default": "0"
+  },
+  {
+   "fieldname": "frequency",
+   "fieldtype": "Select",
+   "label": "Frequency",
+   "options": "Monthly\nQuarterly",
+   "default": "Monthly",
+   "depends_on": "auto_create"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EOSB Provision",
+ "name": "EOSB Provision Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "print": 1,
+   "export": 1,
+   "report": 0,
+   "email": 1,
+   "share": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "HR Manager",
+   "read": 1,
+   "print": 1,
+   "export": 1,
+   "report": 0,
+   "email": 1,
+   "share": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "print": 1,
+   "export": 1,
+   "report": 0,
+   "email": 1,
+   "share": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 0
+  },
+  {
+   "role": "HR User",
+   "read": 1,
+   "print": 1,
+   "export": 1,
+   "report": 0,
+   "email": 1,
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1,
+ "issingle": 1
+}

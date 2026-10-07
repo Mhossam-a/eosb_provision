@@ -1,0 +1,182 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "department",
+  "date_of_joining",
+  "service_days",
+  "number_of_years",
+  "salary_slip",
+  "components",
+  "column_break_1",
+  "last_salary",
+  "allocated_amount",
+  "eosb_booked",
+  "eosb_adjustment",
+  "slab_details",
+  "column_break_2",
+  "leave_balance",
+  "day_salary",
+  "total_leave_amount",
+  "leave_booked",
+  "leave_adjustment"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department",
+   "read_only": 1
+  },
+  {
+   "fieldname": "date_of_joining",
+   "fieldtype": "Date",
+   "label": "Date of Joining",
+   "read_only": 1
+  },
+  {
+   "fieldname": "service_days",
+   "fieldtype": "Float",
+   "label": "Service Days",
+   "read_only": 1,
+   "precision": "2"
+  },
+  {
+   "fieldname": "number_of_years",
+   "fieldtype": "Float",
+   "label": "Number of Years",
+   "read_only": 1,
+   "in_list_view": 1,
+   "precision": "4",
+   "columns": 1
+  },
+  {
+   "fieldname": "salary_slip",
+   "fieldtype": "Link",
+   "label": "Salary Slip",
+   "options": "Salary Slip",
+   "read_only": 1
+  },
+  {
+   "fieldname": "components",
+   "fieldtype": "Small Text",
+   "label": "Components",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_salary",
+   "fieldtype": "Currency",
+   "label": "Last Salary",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "allocated_amount",
+   "fieldtype": "Currency",
+   "label": "EOSB Amount",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "في القيد الافتتاحي بس تقدر تعدّله بالرصيد القديم الفعلي"
+  },
+  {
+   "fieldname": "eosb_booked",
+   "fieldtype": "Currency",
+   "label": "EOSB Booked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "eosb_adjustment",
+   "fieldtype": "Currency",
+   "label": "EOSB Adjustment",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "slab_details",
+   "fieldtype": "Small Text",
+   "label": "Slab Details",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "leave_balance",
+   "fieldtype": "Float",
+   "label": "Leave Balance",
+   "read_only": 1,
+   "in_list_view": 1,
+   "precision": "2",
+   "columns": 1
+  },
+  {
+   "fieldname": "day_salary",
+   "fieldtype": "Currency",
+   "label": "Day Salary",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_leave_amount",
+   "fieldtype": "Currency",
+   "label": "Leave Amount",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "leave_booked",
+   "fieldtype": "Currency",
+   "label": "Leave Booked",
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_adjustment",
+   "fieldtype": "Currency",
+   "label": "Leave Adjustment",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EOSB Provision",
+ "name": "EOSB Provision Employee",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "istable": 1,
+ "editable_grid": 0
+}

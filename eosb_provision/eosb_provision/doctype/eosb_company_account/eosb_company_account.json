@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "cost_center",
+  "default_expense_account",
+  "default_provision_account",
+  "leave_expense_account",
+  "leave_provision_account"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "default_expense_account",
+   "fieldtype": "Link",
+   "label": "Default EOSB Expense Account",
+   "options": "Account",
+   "description": "بيستخدم لو المكوّن مالوش حسابات للشركة دي"
+  },
+  {
+   "fieldname": "default_provision_account",
+   "fieldtype": "Link",
+   "label": "Default EOSB Provision Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "leave_expense_account",
+   "fieldtype": "Link",
+   "label": "Leave Expense Account",
+   "options": "Account",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "leave_provision_account",
+   "fieldtype": "Link",
+   "label": "Leave Provision Account",
+   "options": "Account",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EOSB Provision",
+ "name": "EOSB Company Account",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "istable": 1,
+ "editable_grid": 0
+}

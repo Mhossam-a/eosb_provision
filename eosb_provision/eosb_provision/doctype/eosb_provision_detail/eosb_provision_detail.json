@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-07 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "salary_component",
+  "component_amount",
+  "required_amount",
+  "booked_amount",
+  "adjustment",
+  "expense_account",
+  "provision_account",
+  "is_reversal"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "salary_component",
+   "fieldtype": "Link",
+   "label": "Salary Component",
+   "options": "Salary Component",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "component_amount",
+   "fieldtype": "Currency",
+   "label": "Component Amount",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "required_amount",
+   "fieldtype": "Currency",
+   "label": "Required",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "booked_amount",
+   "fieldtype": "Currency",
+   "label": "Booked",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "adjustment",
+   "fieldtype": "Currency",
+   "label": "Adjustment",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "expense_account",
+   "fieldtype": "Link",
+   "label": "Expense Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "provision_account",
+   "fieldtype": "Link",
+   "label": "Provision Account",
+   "options": "Account",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "is_reversal",
+   "fieldtype": "Check",
+   "label": "Reversal (component no longer paid)",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-07 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EOSB Provision",
+ "name": "EOSB Provision Detail",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0,
+ "istable": 1,
+ "editable_grid": 0
+}
