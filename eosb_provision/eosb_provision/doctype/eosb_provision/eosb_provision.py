@@ -18,91 +18,59 @@ class EOSBProvision(Document):
 	# ------------------------------------------------------------ Get Employees
 	@frappe.whitelist()
 	def get_employees(self):
-		"""يملى الجدول بالموظفين الـ Active ويحسب المستحق والمحجوز والتسوية."""
+		"""يملى الجدول بالموظفين الـ Active (من غير Relieving Date) ويحسب المستحق والمحجوز والتسوية."""
 		if not self.company or not self.posting_date:
 			frappe.throw(_("اختار الشركة والتاريخ الأول"))
 
-		settings = calc.get_settings()
-		rule = calc.load_rule(settings.gratuity_rule)
-		company_accounts = calc.get_company_accounts(settings, self.company)
-		as_of = getdate(self.posting_date)
+		period_start = frappe.db.sql(
+			"""select max(posting_date) from `tabEOSB Provision`
+			where company = %s and docstatus = 1 and posting_date < %s and name != %s""",
+			(self.company, self.posting_date, self.name or ""),
+		)[0][0]
+		rows, skipped, rule, settings = calc.compute_employees(
+			self.company, self.posting_date, self.department, period_start=period_start
+		)
 		self.gratuity_rule = rule.name
-
-		employees = calc.get_active_employees(self.company, as_of, self.department)
-		emp_ids = [e.name for e in employees]
-		salaries = calc.get_salary_components(emp_ids, rule.components, self.company, as_of)
-		leaves = {}
-		if settings.include_leave_provision:
-			leaves = calc.get_leave_balances([e for e in emp_ids if e in salaries], rule.leave_types, as_of)
-
-		days_in_month = flt(settings.days_in_month) or 30
 		self.set("employees", [])
 		self.set("details", [])
+
+		for r in rows:
+			for c in r.components:
+				self.append("details", dict(c, employee=r.employee))
+			self.append(
+				"employees",
+				{
+					"employee": r.employee,
+					"employee_name": r.employee_name,
+					"department": r.department,
+					"date_of_joining": r.date_of_joining,
+					"relieving_date": r.relieving_date,
+					"service_days": r.service_days,
+					"service_text": r.service_text,
+					"number_of_years": r.number_of_years,
+					"salary_slip": r.salary_slip,
+					"components": r.components_text,
+					"last_salary": r.last_salary,
+					"allocated_amount": r.allocated_amount,
+					"slab_details": r.slab_details,
+					"leave_balance": r.leave_balance,
+					"day_salary": r.day_salary,
+					"total_leave_amount": r.total_leave_amount,
+				},
+			)
+
 		notes = [
 			_("Gratuity Rule: {0} · Work Experience: {1} · Days/Year: {2} · Leave Types: {3}").format(
 				rule.name, rule.method or "-", rule.days_per_year, ", ".join(rule.leave_types) or "-"
 			)
 		]
-		skipped = []
-		account_cache = {}
-
-		for e in employees:
-			sal = salaries.get(e.name)
-			if not sal or not sum(sal["components"].values()):
-				skipped.append(e.name)
-				continue
-
-			service_days, basis, years = calc.get_service(e.date_of_joining, as_of, rule, settings)
-			weighted, parts = calc.get_weighted_days(service_days, basis, years, rule)
-			earnings = flt(sum(sal["components"].values()), 2)
-			total_eosb = flt(earnings * weighted / basis, 2)
-
-			# الراتب متقسم على كذا مكوّن: المستحق بيتوزع عليهم بنسبة كل مكوّن من الأجر
-			per_component = calc.distribute(total_eosb, sal["components"])
-			for comp, comp_amount in sal["components"].items():
-				key = (comp, self.company)
-				if key not in account_cache:
-					account_cache[key] = calc.get_component_accounts(comp, self.company, company_accounts)
-				exp, prov = account_cache[key]
-				self.append(
-					"details",
-					{
-						"employee": e.name,
-						"salary_component": comp,
-						"component_amount": comp_amount,
-						"required_amount": per_component[comp],
-						"expense_account": exp,
-						"provision_account": prov,
-					},
-				)
-
-			leave_balance, _leave_text = leaves.get(e.name, (0, ""))
-			slab_text = " | ".join(
-				"{0:g}→{1}: {2:g} يوم × {3:g}".format(
-					s.from_year, "∞" if s.to_year >= 9999 else f"{s.to_year:g}", portion, s.fraction
-				)
-				for s, portion in parts
+		leavers = [r.employee for r in rows if r.left_in_period]
+		if leavers:
+			notes.append(
+				_(
+					"موظفين سابوا جوه الفترة (اتحسبلهم لحد يوم الترك، وبعد كده مش هيظهروا): {0}"
+				).format(", ".join(leavers))
 			)
-			self.append(
-				"employees",
-				{
-					"employee": e.name,
-					"employee_name": e.employee_name,
-					"department": e.department,
-					"date_of_joining": e.date_of_joining,
-					"service_days": service_days,
-					"number_of_years": flt(years, 4),
-					"salary_slip": sal["slip"],
-					"components": " | ".join(f"{c}: {a:,.2f}" for c, a in sal["components"].items()),
-					"last_salary": earnings,
-					"allocated_amount": total_eosb,
-					"slab_details": slab_text,
-					"leave_balance": leave_balance,
-					"day_salary": flt(earnings / days_in_month, 2),
-					"total_leave_amount": flt(leave_balance * earnings / days_in_month, 2),
-				},
-			)
-
 		if skipped:
 			notes.append(
 				_(

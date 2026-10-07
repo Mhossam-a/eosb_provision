@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 0,
- "creation": "2026-10-07 12:00:00.000000",
+ "creation": "2026-10-07 20:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -11,8 +11,9 @@
   "total_working_days_per_year",
   "minimum_year_for_gratuity",
   "column_break_calc",
-  "ksa_day_count",
+  "deduct_unpaid_days",
   "days_in_month",
+  "relieving_date_handling",
   "posting_section",
   "include_leave_provision",
   "submit_journal_entry",
@@ -61,18 +62,25 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "ksa_day_count",
-   "fieldtype": "Select",
-   "label": "KSA Labor Law Day Count",
-   "options": "30/360 (inclusive)\nActual Days / Total working Days Per Year",
-   "default": "30/360 (inclusive)",
-   "description": "بيستخدم بس لو طريقة الـ Rule = KSA Labor Law. باقي الطرق بتقسم الأيام الفعلية على Total working Days Per Year"
+   "fieldname": "deduct_unpaid_days",
+   "fieldtype": "Check",
+   "label": "Deduct Absent / Leave Without Pay Days",
+   "default": "0",
+   "description": "يخصم أيام الغياب والإجازات بدون أجر (من الـ Attendance) من مدة الخدمة، زي HRMS Gratuity"
   },
   {
    "fieldname": "days_in_month",
    "fieldtype": "Int",
    "label": "Days in Month (Leave Day Salary)",
    "default": "30"
+  },
+  {
+   "fieldname": "relieving_date_handling",
+   "fieldtype": "Select",
+   "label": "Employees with Relieving Date",
+   "options": "Exclude once Relieving Date is set\nInclude until Relieving Date",
+   "default": "Exclude once Relieving Date is set",
+   "description": "Exclude: أول ما يتحط Relieving Date للموظف المخصص بتاعه بيقف ومايظهرش. Include: بيظهر ويتحسب لحد يوم الترك، وبعدها مايظهرش"
   },
   {
    "fieldname": "posting_section",
@@ -120,7 +128,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-07 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Settings",

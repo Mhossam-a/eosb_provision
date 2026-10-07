@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 0,
- "creation": "2026-10-07 12:00:00.000000",
+ "creation": "2026-10-07 20:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -9,7 +9,9 @@
   "employee_name",
   "department",
   "date_of_joining",
+  "relieving_date",
   "service_days",
+  "service_text",
   "number_of_years",
   "salary_slip",
   "components",
@@ -56,11 +58,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "relieving_date",
+   "fieldtype": "Date",
+   "label": "Relieving Date",
+   "read_only": 1,
+   "description": "لو ساب جوه الفترة، المستحق اتحسب لحد اليوم ده"
+  },
+  {
    "fieldname": "service_days",
    "fieldtype": "Float",
    "label": "Service Days",
    "read_only": 1,
    "precision": "2"
+  },
+  {
+   "fieldname": "service_text",
+   "fieldtype": "Data",
+   "label": "Service Period",
+   "read_only": 1
   },
   {
    "fieldname": "number_of_years",
@@ -167,7 +182,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-07 12:00:00.000000",
+ "modified": "2026-10-07 20:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Employee",
