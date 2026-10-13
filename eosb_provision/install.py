@@ -2,6 +2,10 @@ import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 LEGACY_EXPENSE = "custom_gratuity_expense_account"
+APP_CUSTOM_FIELDS = {
+	"Salary Component": ["eosb_accounts_section", "eosb_accounts"],
+	"Journal Entry": ["eosb_provision"],
+}
 LEGACY_PROVISION = "custom_gratuity_payable_account"
 
 
@@ -73,3 +77,15 @@ def migrate_legacy_component_accounts():
 		moved += 1
 	if moved:
 		print(f"EOSB Provision: moved legacy accounts of {moved} Salary Component(s) to EOSB Provision Accounts")
+
+
+def before_uninstall():
+	"""يمسح الحقول اللي الـ App ضافها على Salary Component و Journal Entry،
+	عشان الشاشات دي ماتبوظش بعد إزالة الـ App."""
+	for dt, fields in APP_CUSTOM_FIELDS.items():
+		for fieldname in fields:
+			name = frappe.db.get_value("Custom Field", {"dt": dt, "fieldname": fieldname})
+			if name:
+				frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
+	frappe.clear_cache(doctype="Salary Component")
+	frappe.clear_cache(doctype="Journal Entry")

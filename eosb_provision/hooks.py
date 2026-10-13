@@ -9,6 +9,7 @@ required_apps = ["erpnext", "hrms"]
 
 after_install = "eosb_provision.install.after_install"
 after_migrate = "eosb_provision.install.after_install"
+before_uninstall = "eosb_provision.install.before_uninstall"
 
 doctype_js = {
 	"Salary Component": "public/js/salary_component.js",
