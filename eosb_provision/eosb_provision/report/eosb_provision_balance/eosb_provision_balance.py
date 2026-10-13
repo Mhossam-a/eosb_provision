@@ -65,7 +65,7 @@ def execute(filters=None):
 			continue
 
 		eb = flt(eosb_booked.get(emp), 2)
-		lb = flt(leave_booked.get(emp), 2)
+		lb = flt((leave_booked.get(emp) or frappe._dict()).get("amount"), 2)
 		if in_calc:
 			note = ""
 		elif info.status == "Left" or info.relieving_date:
@@ -88,6 +88,7 @@ def execute(filters=None):
 				"service_text": r.service_text if in_calc else "",
 				"number_of_years": r.number_of_years if in_calc else None,
 				"last_salary": r.last_salary if in_calc else None,
+				"earnings_from": (r.salary_structure_assignment or r.salary_slip) if in_calc else None,
 				"eosb_live": eosb_live,
 				"eosb_booked": eb,
 				"eosb_unbooked": flt(eosb_live - eb, 2) if in_calc else 0,
@@ -121,6 +122,7 @@ def get_columns():
 		c("service_text", _("Service Period"), "Data", None, 160),
 		c("number_of_years", _("Years"), "Float", None, 80),
 		c("last_salary", _("Salary"), "Currency", None, 110),
+		c("earnings_from", _("Salary From"), "Data", None, 170),
 		c("eosb_live", _("EOSB Due"), "Currency", None, 120),
 		c("eosb_booked", _("EOSB Booked"), "Currency", None, 120),
 		c("eosb_unbooked", _("EOSB Not Booked Yet"), "Currency", None, 130),

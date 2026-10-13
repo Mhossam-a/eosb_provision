@@ -16,6 +16,7 @@ doctype_js = {
 
 doc_events = {
 	"Journal Entry": {
+		"validate": "eosb_provision.events.journal_entry_validate",
 		"on_submit": "eosb_provision.events.journal_entry_on_submit",
 		"before_cancel": "eosb_provision.events.journal_entry_before_cancel",
 		"on_trash": "eosb_provision.events.journal_entry_on_trash",

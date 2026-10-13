@@ -64,7 +64,7 @@ frappe.ui.form.on("EOSB Provision", {
 					frappe.msgprint({
 						title: __("ملاحظات الحسبة"),
 						indicator: "orange",
-						message: notes.join("<br><br>"),
+						message: notes.map((n) => frappe.utils.escape_html(n).replace(/\n/g, "<br>")).join("<br><br>"),
 					});
 				}
 			},

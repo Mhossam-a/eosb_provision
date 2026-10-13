@@ -37,3 +37,22 @@ def journal_entry_on_trash(doc, method=None):
 				frappe.get_desk_link("EOSB Provision", p.name)
 			)
 		)
+
+
+def journal_entry_validate(doc, method=None):
+	"""القيد اللي جاي من مخصص مينفعش تتعدل حساباته أو مبالغه يدوي (عشان المحجوز يفضل مطابق للـ GL).
+	تقدر تغير البيان أو الـ Cost Center عادي."""
+	if doc.flags.get("from_eosb_provision") or doc.is_new():
+		return
+	p = _provision(doc)
+	if not p or p.docstatus != 1:
+		return
+	from eosb_provision.eosb_provision.doctype.eosb_provision.eosb_provision import journal_entry_hash
+
+	stored = frappe.db.get_value("EOSB Provision", p.name, "journal_entry_hash")
+	if stored and stored != journal_entry_hash(doc):
+		frappe.throw(
+			_(
+				"مينفعش تعدّل الحسابات أو المبالغ في قيد جاي من {0}. لو محتاج تعديل: اعمل Cancel للمخصص، وصلّح الإعدادات، واعمل مخصص جديد"
+			).format(frappe.get_desk_link("EOSB Provision", p.name))
+		)

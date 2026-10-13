@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dump.rdb
+.DS_Store
+node_modules/

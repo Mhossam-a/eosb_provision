@@ -49,6 +49,8 @@ class EOSBProvision(Document):
 					"service_text": r.service_text,
 					"number_of_years": r.number_of_years,
 					"salary_slip": r.salary_slip,
+					"salary_structure_assignment": r.salary_structure_assignment,
+					"earnings_note": r.earnings_note,
 					"components": r.components_text,
 					"last_salary": r.last_salary,
 					"allocated_amount": r.allocated_amount,
@@ -60,8 +62,12 @@ class EOSBProvision(Document):
 			)
 
 		notes = [
-			_("Gratuity Rule: {0} · Work Experience: {1} · Days/Year: {2} · Leave Types: {3}").format(
-				rule.name, rule.method or "-", rule.days_per_year, ", ".join(rule.leave_types) or "-"
+			_("Gratuity Rule: {0} · Work Experience: {1} · Days/Year: {2} · Leave Types: {3} · Earnings: {4}").format(
+				rule.name,
+				rule.method or "-",
+				rule.days_per_year,
+				", ".join(rule.leave_types) or "-",
+				settings.get("earnings_source") or calc.SOURCE_SSA,
 			)
 		]
 		leavers = [r.employee for r in rows if r.left_in_period]
@@ -72,10 +78,11 @@ class EOSBProvision(Document):
 				).format(", ".join(leavers))
 			)
 		if skipped:
+			reasons = frappe.flags.get("eosb_skipped_reasons") or {}
 			notes.append(
-				_(
-					"موظفين Active من غير Salary Slip عاملة Submit فيها مكونات الـ Rule (اتخطوا، ورصيدهم المحجوز زي ما هو): {0}"
-				).format(", ".join(skipped))
+				_("موظفين اتخطوا (رصيدهم المحجوز زي ما هو):")
+				+ "\n"
+				+ "\n".join(f"- {e}: {reasons.get(e, '')}" for e in skipped)
 			)
 		self.notes = "\n".join(notes)
 		self.apply_booked()
@@ -85,43 +92,61 @@ class EOSBProvision(Document):
 	# ------------------------------------------------------------ booked / adjustment
 	def apply_booked(self):
 		"""المحجوز = آخر قيمة في آخر مخصص Submitted (أول مرة = الافتتاحي).
-		التسوية = المستحق − المحجوز. ولو موظف اتشال منه مكوّن (اتنقل إدارة مثلاً) بيتعمله سطر عكس."""
+		التسوية = المستحق − المحجوز.
+		- لو موظف اتشال منه مكوّن (اتنقل إدارة مثلاً) بيتعمله سطر عكس.
+		- لو حساب المخصص بتاع المكوّن اتغير، الرصيد القديم بيتعكس من الحساب القديم
+		  والمستحق كله بيتقيد على الحساب الجديد (نقل رصيد بين الحسابين)."""
 		self.set("details", [d for d in self.details if not d.is_reversal])
 		booked, leave_booked = calc.get_booked(self.company, self.posting_date, exclude=self.name)
 		in_run = {e.employee for e in self.employees}
 		present = {(d.employee, d.salary_component) for d in self.details}
+		moved = set()
 
 		for d in self.details:
 			b = booked.get((d.employee, d.salary_component))
+			if b and b.provision_account and d.provision_account and b.provision_account != d.provision_account:
+				moved.add((d.employee, d.salary_component))
+				b = None
 			d.booked_amount = flt(b.required_amount, 2) if b else 0
 			d.adjustment = 0 if self.is_opening else flt(flt(d.required_amount) - d.booked_amount, 2)
 
 		for (emp, comp), b in booked.items():
-			if emp in in_run and (emp, comp) not in present and flt(b.required_amount):
-				self.append(
-					"details",
-					{
-						"employee": emp,
-						"salary_component": comp,
-						"component_amount": 0,
-						"required_amount": 0,
-						"booked_amount": flt(b.required_amount, 2),
-						"adjustment": 0 if self.is_opening else -flt(b.required_amount, 2),
-						"expense_account": b.expense_account,
-						"provision_account": b.provision_account,
-						"is_reversal": 1,
-					},
-				)
+			if emp not in in_run or not flt(b.required_amount):
+				continue
+			if (emp, comp) in present and (emp, comp) not in moved:
+				continue
+			self.append(
+				"details",
+				{
+					"employee": emp,
+					"salary_component": comp,
+					"component_amount": 0,
+					"required_amount": 0,
+					"booked_amount": flt(b.required_amount, 2),
+					"adjustment": 0 if self.is_opening else -flt(b.required_amount, 2),
+					"expense_account": b.expense_account,
+					"provision_account": b.provision_account,
+					"is_reversal": 1,
+				},
+			)
 
 		by_emp = {}
 		for d in self.details:
 			agg = by_emp.setdefault(d.employee, [0, 0])
 			agg[0] += flt(d.booked_amount)
 			agg[1] += flt(d.adjustment)
+
+		settings = calc.get_settings()
+		leave_account = calc.get_company_accounts(settings, self.company).get("leave_provision_account")
+		self.flags.leave_previous_accounts = {}
 		for e in self.employees:
 			e.eosb_booked = flt(by_emp.get(e.employee, [0, 0])[0], 2)
 			e.eosb_adjustment = flt(by_emp.get(e.employee, [0, 0])[1], 2)
-			e.leave_booked = flt(leave_booked.get(e.employee), 2)
+			lb = leave_booked.get(e.employee) or frappe._dict()
+			e.leave_booked = flt(lb.get("amount"), 2)
+			e.leave_provision_account = leave_account if settings.include_leave_provision else None
+			if lb.get("account") and e.leave_provision_account and lb.account != e.leave_provision_account:
+				self.flags.leave_previous_accounts[e.employee] = lb.account
 			e.leave_adjustment = 0 if self.is_opening else flt(flt(e.total_leave_amount) - e.leave_booked, 2)
 
 	# ------------------------------------------------------------ opening edits
@@ -159,6 +184,11 @@ class EOSBProvision(Document):
 		if not self.employees:
 			frappe.throw(_("اضغط Get Employees الأول"))
 		self.validate_order()
+		if not self.is_opening:
+			# Accounts Frozen Till Date (Accounts Settings): نفس فحص ERPNext، قبل ما يتعمل القيد
+			from erpnext.accounts.general_ledger import check_freezing_date
+
+			check_freezing_date(self.posting_date)
 		if self.is_opening:
 			previous = frappe.db.exists(
 				"EOSB Provision", {"company": self.company, "docstatus": 1, "name": ("!=", self.name)}
@@ -272,6 +302,15 @@ class EOSBProvision(Document):
 				prov_by_emp[key] = flt(prov_by_emp.get(key, 0) + adj, 2)
 				expense_totals[leave_exp] = flt(expense_totals.get(leave_exp, 0) + adj, 2)
 
+		# حساب مخصص الإجازات اتغير في الإعدادات: نقل الرصيد القديم للحساب الجديد
+		for e in self.employees:
+			old_account = (self.flags.leave_previous_accounts or {}).get(e.employee)
+			if old_account and flt(e.leave_booked):
+				amt = flt(e.leave_booked, 2)
+				add(old_account, amt, party_for(old_account, e.employee))  # مدين الحساب القديم
+				key = (e.employee, e.leave_provision_account)
+				prov_by_emp[key] = flt(prov_by_emp.get(key, 0) + amt, 2)  # دائن الحساب الجديد
+
 		for account, amount in expense_totals.items():
 			add(account, amount)  # مدين المصروف (دائن لو بالسالب)
 		for (employee, account), amount in prov_by_emp.items():
@@ -291,10 +330,31 @@ class EOSBProvision(Document):
 		for row in lines:
 			je.append("accounts", row)
 		je.flags.ignore_permissions = True
+		je.flags.from_eosb_provision = True
 		je.insert()
+		self.db_set("journal_entry_hash", journal_entry_hash(je))
 		if settings.submit_journal_entry:
 			je.submit()
 		return je
+
+
+def journal_entry_hash(je):
+	"""بصمة سطور القيد (الحساب، والطرف، والمبالغ). بتتسجل وقت إنشاء القيد،
+	وأي تعديل يدوي في المبالغ أو الحسابات بعد كده بيترفض."""
+	import hashlib
+	import json
+
+	rows = sorted(
+		(
+			a.account,
+			a.party_type or "",
+			a.party or "",
+			f"{flt(a.debit_in_account_currency, 2):.2f}",
+			f"{flt(a.credit_in_account_currency, 2):.2f}",
+		)
+		for a in je.accounts
+	)
+	return hashlib.md5(json.dumps(rows).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------- scheduler

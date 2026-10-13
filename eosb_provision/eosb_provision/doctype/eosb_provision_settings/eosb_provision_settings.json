@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 0,
- "creation": "2026-10-07 21:00:00.000000",
+ "creation": "2026-10-12 15:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -10,6 +10,7 @@
   "work_experience_method",
   "total_working_days_per_year",
   "minimum_year_for_gratuity",
+  "earnings_source",
   "column_break_calc",
   "slab_calculation",
   "deduct_unpaid_days",
@@ -57,6 +58,14 @@
    "label": "Minimum Year for Gratuity",
    "read_only": 1,
    "fetch_from": "gratuity_rule.minimum_year_for_gratuity"
+  },
+  {
+   "fieldname": "earnings_source",
+   "fieldtype": "Select",
+   "label": "Earnings Source",
+   "options": "Salary Structure Assignment\nLast Salary Slip",
+   "default": "Salary Structure Assignment",
+   "description": "Salary Structure Assignment: الـ Base والمعادلات بتاعة الـ Salary Structure (من غير ما يحتاج Salary Slip). Last Salary Slip: آخر Salary Slip عاملة Submit. ولو المصدر مش لاقي حاجة للموظف بيجرب التاني"
   },
   {
    "fieldname": "column_break_calc",
@@ -137,7 +146,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-07 21:00:00.000000",
+ "modified": "2026-10-12 15:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Settings",

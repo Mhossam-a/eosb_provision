@@ -24,6 +24,8 @@ KSA_METHOD = "KSA Labor Law"
 EXCLUDE_RELIEVING = "Exclude once Relieving Date is set"
 INCLUDE_UNTIL_RELIEVING = "Include until Relieving Date"
 SUM_OF_SLABS = "Sum of all previous slabs"
+SOURCE_SSA = "Salary Structure Assignment"
+SOURCE_SLIP = "Last Salary Slip"
 AS_PER_RULE = "As per Gratuity Rule"
 
 
@@ -233,6 +235,131 @@ def get_salary_components(employees, components, company, as_of):
 	return out
 
 
+def get_ssa(employee, company, on_date):
+	"""آخر Salary Structure Assignment عاملة Submit من تاريخها <= التاريخ.
+	لو مفيش (مثلاً التاريخ قبل أول Assignment): أول Assignment للموظف، مع ملاحظة."""
+	fields = ["name", "salary_structure", "from_date", "base", "variable"]
+	ssa = frappe.db.get_value(
+		"Salary Structure Assignment",
+		{"employee": employee, "company": company, "docstatus": 1, "from_date": ("<=", on_date)},
+		fields,
+		order_by="from_date desc",
+		as_dict=True,
+	)
+	if ssa:
+		return ssa, None
+	ssa = frappe.db.get_value(
+		"Salary Structure Assignment",
+		{"employee": employee, "company": company, "docstatus": 1},
+		fields,
+		order_by="from_date asc",
+		as_dict=True,
+	)
+	if ssa:
+		return ssa, _("الـ Assignment بيبدأ {0} بعد تاريخ الحسبة، فاتاخد أول Assignment").format(
+			frappe.format(ssa.from_date, "Date")
+		)
+	return None, None
+
+
+def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
+	"""يحسب مكونات الـ Earnings من الـ Salary Structure بمعادلاتها و Base / Variable بتوع الـ Assignment،
+	بنفس كود HRMS اللي بيستخدمه الـ Salary Slip (من غير ما يعمل Salary Slip).
+	يرجع {salary_component: default_amount} (المبلغ الكامل للشهر من غير تقسيم أيام)."""
+	ssa_doc = frappe.get_doc("Salary Structure Assignment", ssa_name)
+
+	# HRMS v16+: الـ Assignment نفسه بيقيّم المعادلات
+	if hasattr(ssa_doc, "get_evaluated_components"):
+		rows = ssa_doc.get_evaluated_components().earnings
+		out = {}
+		for r in rows:
+			if r.get("statistical_component"):
+				continue
+			out[r.salary_component] = out.get(r.salary_component, 0) + flt(r.get("default_amount"))
+		return out
+
+	# HRMS v15: نفس دوال الـ Salary Slip، للـ Earnings بس (من غير ضرايب ولا Additional Salary)
+	structure = frappe.get_cached_doc("Salary Structure", ssa_doc.salary_structure)
+	slip = frappe.new_doc("Salary Slip")
+	slip.update(
+		{
+			"employee": employee,
+			"employee_name": frappe.get_cached_value("Employee", employee, "employee_name"),
+			"company": company,
+			"salary_structure": ssa_doc.salary_structure,
+			"payroll_frequency": structure.payroll_frequency,
+			"posting_date": on_date,
+			"start_date": on_date,
+			"end_date": on_date,
+			"total_working_days": 30,
+			"payment_days": 30,
+			"salary_slip_based_on_timesheet": 0,
+		}
+	)
+	slip._salary_structure_assignment = frappe.db.get_value(
+		"Salary Structure Assignment", ssa_name, "*", as_dict=True
+	)
+	slip.set_salary_structure_doc()
+	slip.add_structure_components("earnings")
+	out = {}
+	for r in slip.earnings:
+		out[r.salary_component] = out.get(r.salary_component, 0) + flt(r.default_amount or r.amount)
+	return out
+
+
+def get_slip_earnings(employees, components, company, as_of):
+	"""آخر Salary Slip عاملة Submit، فترتها بدأت في التاريخ أو قبله، ومكونات الـ Rule بس."""
+	return get_salary_components(employees, components, company, as_of)
+
+
+def get_earnings(employees, calc_dates, components, company, as_of, source=None):
+	"""الأجر المعتمد لكل موظف (مكونات الـ Rule بس).
+	source = Salary Structure Assignment (الافتراضي) أو Last Salary Slip.
+	لو المصدر الأساسي مش لاقي حاجة للموظف، بيجرب المصدر التاني ويكتب ملاحظة.
+	يرجع ({employee: {"source", "ref", "components", "note"}}, {employee: error})."""
+	source = source or SOURCE_SSA
+	comp_set = set(components)
+	out, errors = {}, {}
+
+	def from_ssa(emp):
+		ssa, note = get_ssa(emp, company, calc_dates.get(emp) or as_of)
+		if not ssa:
+			return None
+		try:
+			amounts = evaluate_ssa_earnings(ssa.name, emp, company, calc_dates.get(emp) or as_of)
+		except Exception as e:
+			frappe.clear_last_message()
+			errors[emp] = _("خطأ في معادلات {0}: {1}").format(ssa.salary_structure, frappe.utils.strip_html(str(e))[:200])
+			return None
+		comps = {c: flt(a, 2) for c, a in amounts.items() if c in comp_set and flt(a)}
+		if not comps:
+			return None
+		return {"source": SOURCE_SSA, "ref": ssa.name, "components": comps, "note": note}
+
+	slips = None
+
+	def from_slip(emp):
+		nonlocal slips
+		if slips is None:
+			slips = get_slip_earnings(employees, components, company, as_of)
+		sal = slips.get(emp)
+		if not sal or not sum(sal["components"].values()):
+			return None
+		return {"source": SOURCE_SLIP, "ref": sal["slip"], "components": sal["components"], "note": None}
+
+	order = (from_ssa, from_slip) if source == SOURCE_SSA else (from_slip, from_ssa)
+	for emp in employees:
+		res = order[0](emp)
+		if not res:
+			res = order[1](emp)
+			if res:
+				res["note"] = (res["note"] + " · " if res["note"] else "") + _("اتاخد من {0}").format(res["source"])
+		if res:
+			out[emp] = res
+			errors.pop(emp, None)
+	return out, errors
+
+
 def get_unpaid_days(employees, as_of):
 	"""أيام الغياب والإجازات بدون أجر من الـ Attendance (زي HRMS Gratuity)."""
 	if not employees:
@@ -315,7 +442,9 @@ def compute_employees(
 	)
 	emp_ids = [e.name for e in employees]
 	calc_dates = {e.name: e.calc_date for e in employees}
-	salaries = get_salary_components(emp_ids, rule.components, company, as_of)
+	salaries, salary_errors = get_earnings(
+		emp_ids, calc_dates, rule.components, company, as_of, settings.get("earnings_source")
+	)
 	unpaid = get_unpaid_days(emp_ids, as_of) if settings.deduct_unpaid_days else {}
 	leaves = {}
 	if settings.include_leave_provision:
@@ -323,10 +452,14 @@ def compute_employees(
 	days_in_month = flt(settings.days_in_month) or 30
 
 	rows, skipped, account_cache = [], [], {}
+	skipped_reasons = {}
 	for e in employees:
 		sal = salaries.get(e.name)
 		if not sal or not sum(sal["components"].values()):
 			skipped.append(e.name)
+			skipped_reasons[e.name] = salary_errors.get(e.name) or _(
+				"مالوش Salary Structure Assignment ولا Salary Slip فيهم مكونات الـ Rule"
+			)
 			continue
 
 		deduct = unpaid.get(e.name, 0)
@@ -373,7 +506,9 @@ def compute_employees(
 				service_text=text + (f"  (مخصوم {deduct:g} يوم بدون أجر)" if deduct else ""),
 				unpaid_days=deduct,
 				number_of_years=flt(years, 4),
-				salary_slip=sal["slip"],
+				salary_slip=sal["ref"] if sal["source"] == SOURCE_SLIP else None,
+				salary_structure_assignment=sal["ref"] if sal["source"] == SOURCE_SSA else None,
+				earnings_note=sal.get("note"),
 				components_text=" | ".join(f"{c}: {a:,.2f}" for c, a in sal["components"].items()),
 				last_salary=earnings,
 				allocated_amount=total_eosb,
@@ -384,6 +519,7 @@ def compute_employees(
 				components=components,
 			)
 		)
+	frappe.flags.eosb_skipped_reasons = skipped_reasons
 	return rows, skipped, rule, settings
 
 
@@ -398,7 +534,7 @@ def get_booked(company, as_of, exclude=None):
 		from (
 			select d.employee, d.salary_component, d.required_amount, d.expense_account, d.provision_account,
 			       row_number() over (partition by d.employee, d.salary_component
-			                          order by p.posting_date desc, p.creation desc) as rn
+			                          order by p.posting_date desc, p.creation desc, d.is_reversal asc, d.idx desc) as rn
 			from `tabEOSB Provision Detail` d
 			join `tabEOSB Provision` p on p.name = d.parent
 			where p.docstatus = 1 and p.company = %(company)s
@@ -415,9 +551,9 @@ def get_booked(company, as_of, exclude=None):
 
 	leave_rows = frappe.db.sql(
 		"""
-		select employee, total_leave_amount
+		select employee, total_leave_amount, leave_provision_account
 		from (
-			select e.employee, e.total_leave_amount,
+			select e.employee, e.total_leave_amount, e.leave_provision_account,
 			       row_number() over (partition by e.employee
 			                          order by p.posting_date desc, p.creation desc) as rn
 			from `tabEOSB Provision Employee` e
@@ -430,7 +566,10 @@ def get_booked(company, as_of, exclude=None):
 		params,
 		as_dict=True,
 	)
-	leave = {r.employee: flt(r.total_leave_amount) for r in leave_rows}
+	leave = {
+		r.employee: frappe._dict(amount=flt(r.total_leave_amount), account=r.leave_provision_account)
+		for r in leave_rows
+	}
 	return eosb, leave
 
 
