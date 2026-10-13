@@ -185,10 +185,16 @@ class EOSBProvision(Document):
 			frappe.throw(_("اضغط Get Employees الأول"))
 		self.validate_order()
 		if not self.is_opening:
-			# Accounts Frozen Till Date (Accounts Settings): نفس فحص ERPNext، قبل ما يتعمل القيد
+			# Accounts Frozen Till Date: نفس فحص ERPNext، قبل ما يتعمل القيد
+			# (v15: في Accounts Settings، v16: في الـ Company)
+			import inspect
+
 			from erpnext.accounts.general_ledger import check_freezing_date
 
-			check_freezing_date(self.posting_date)
+			if "company" in inspect.signature(check_freezing_date).parameters:
+				check_freezing_date(self.posting_date, self.company)
+			else:
+				check_freezing_date(self.posting_date)
 		if self.is_opening:
 			previous = frappe.db.exists(
 				"EOSB Provision", {"company": self.company, "docstatus": 1, "name": ("!=", self.name)}
