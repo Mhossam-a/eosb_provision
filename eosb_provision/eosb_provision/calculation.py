@@ -4,8 +4,8 @@
 حسبة مخصص نهاية الخدمة ورصيد الإجازات (نظام العمل السعودي - المادة 84).
 
 كل الإعدادات من الـ Gratuity Rule اللي في EOSB Provision Settings:
-  - المكونات      : applicable_earnings_component   (الأجر الفعلي = مجموعها من آخر Salary Slip)
-  - الشرائح       : gratuity_rule_slabs             (كل شريحة بتاخد سنينها بس × نسبتها)
+  - المكونات      : applicable_earnings_component   (الأجر = مجموعها من الـ Salary Structure Assignment أو آخر Salary Slip)
+  - الشرائح       : gratuity_rule_slabs             (نفس خوارزمية HRMS Gratuity)
   - عدد الأيام    : total_working_days_per_year     (للطرق العادية)
   - أقل مدة       : minimum_year_for_gratuity
   - طريقة السنين  : work_experience_calculation_function
@@ -92,14 +92,26 @@ def get_service(date_of_joining, as_of, rule, deduct_days=0):
 
 	service_days = max(service_days, 0)
 	years = service_days / basis
-	if rule.method == "Round off Work Experience":
+	if rule.method == KSA_METHOD:
+		pass  # الأيام زي ما هي (30/360)
+	elif rule.method == "Round off Work Experience":
 		years = round(years)
 		service_days = years * basis
-	elif rule.method == "Take Exact Completed Years":
-		years = int(years)
+	else:
+		# زي HRMS Gratuity.get_work_experience بالظبط: المدة بكسورها،
+		# متقربة لدقة حقل Current Work Experience (مفيش تقريب لتحت لـ Take Exact Completed Years)
+		years = flt(years, experience_precision())
 		service_days = years * basis
 
 	return service_days, basis, years, service_text(service_days, basis)
+
+
+def experience_precision():
+	if frappe.local.flags.get("eosb_experience_precision") is None:
+		frappe.local.flags.eosb_experience_precision = frappe.new_doc("Gratuity").precision(
+			"current_work_experience"
+		)
+	return frappe.local.flags.eosb_experience_precision
 
 
 def service_text(service_days, basis):
@@ -115,24 +127,34 @@ def get_weighted_days(service_days, basis, years, rule, slab_mode=None):
 	slab_mode:
 	  - Sum of all previous slabs (الافتراضي): كل شريحة بتاخد سنينها بس × نسبتها
 	  - As per Gratuity Rule: زي حقل Calculate Gratuity Amount Based On في الـ Rule
-	    (لو Current Slab: كل المدة × نسبة الشريحة اللي الموظف واقف فيها، زي HRMS)"""
+	    (لو Current Slab: كل المدة × نسبة الشريحة اللي الموظف واقف فيها، زي HRMS)
+
+	نفس خوارزمية HRMS Gratuity.get_gratuity_amount خطوة بخطوة (نفس المقارنات وحدود الشرائح)،
+	بس الحساب بالأيام بدل السنين عشان مايحصلش فرق تقريب. to_year = 9999 معناها مفتوحة (0 في الـ Rule)."""
 	if years < rule.min_years:
 		return 0, []
 
 	based_on = rule.based_on if slab_mode == AS_PER_RULE else SUM_OF_SLABS
+	weighted, parts = 0, []
 	if based_on == "Current Slab":
 		for s in rule.slabs:
-			if s.from_year <= years < s.to_year:
-				return service_days * s.fraction, [(s, service_days)]
-		return 0, []
+			if s.from_year <= years <= s.to_year:
+				weighted, parts = service_days * s.fraction, [(s, service_days)]
+				if s.fraction:
+					break
+		return weighted, parts
 
-	weighted = 0
-	parts = []
+	days_left = service_days
 	for s in rule.slabs:
-		portion = min(service_days, s.to_year * basis) - s.from_year * basis
-		if portion > 0:
+		if s.from_year < years and s.to_year < years:  # عدّى الشريحة كلها
+			portion = (s.to_year - s.from_year) * basis
 			weighted += portion * s.fraction
+			days_left -= portion
 			parts.append((s, portion))
+		elif s.from_year <= years <= s.to_year:  # الشريحة اللي واقف فيها: باقي المدة كلها
+			weighted += days_left * s.fraction
+			parts.append((s, days_left))
+			break
 	return weighted, parts
 
 
@@ -360,27 +382,36 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 	return out, errors
 
 
-def get_unpaid_days(employees, as_of):
-	"""أيام الغياب والإجازات بدون أجر من الـ Attendance (زي HRMS Gratuity)."""
+def get_unpaid_days(employees, calc_dates):
+	"""الأيام اللي بتتخصم من مدة الخدمة، بنفس طريقة HRMS Gratuity.get_total_working_days بالظبط:
+	حسب Payroll Based On في Payroll Settings
+	  Leave      ← أيام Attendance «On Leave» بنوع إجازة Is Leave Without Pay
+	  Attendance ← أيام Attendance «Absent»
+	لحد تاريخ الحسبة بتاع كل موظف. calc_dates = {employee: date}"""
 	if not employees:
 		return {}
-	lwp = tuple(frappe.get_all("Leave Type", filters={"is_lwp": 1}, pluck="name")) or ("__none__",)
+	based_on = frappe.db.get_single_value("Payroll Settings", "payroll_based_on") or "Leave"
+	params = {"employees": tuple(employees), "to_date": max(getdate(d) for d in calc_dates.values())}
+	if based_on == "Attendance":
+		cond = "status = 'Absent'"
+	else:
+		params["lwp"] = tuple(frappe.get_all("Leave Type", filters={"is_lwp": 1}, pluck="name")) or ("__none__",)
+		cond = "status = 'On Leave' and leave_type in %(lwp)s"
 	rows = frappe.db.sql(
-		"""
-		select employee,
-		       sum(case
-		             when status = 'Absent' then 1
-		             when status = 'On Leave' and leave_type in %(lwp)s then 1
-		             when status = 'Half Day' and leave_type in %(lwp)s then 0.5
-		             else 0 end) as days
+		f"""
+		select employee, attendance_date
 		from `tabAttendance`
-		where docstatus = 1 and employee in %(employees)s and attendance_date <= %(as_of)s
-		group by employee
+		where docstatus = 1 and {cond}
+		  and employee in %(employees)s and attendance_date <= %(to_date)s
 		""",
-		{"employees": tuple(employees), "lwp": lwp, "as_of": as_of},
+		params,
 		as_dict=True,
 	)
-	return {r.employee: flt(r.days) for r in rows}
+	out = {}
+	for r in rows:
+		if getdate(r.attendance_date) <= getdate(calc_dates[r.employee]):
+			out[r.employee] = out.get(r.employee, 0) + 1
+	return out
 
 
 def get_leave_balances(employees, leave_types, as_of):
@@ -445,7 +476,7 @@ def compute_employees(
 	salaries, salary_errors = get_earnings(
 		emp_ids, calc_dates, rule.components, company, as_of, settings.get("earnings_source")
 	)
-	unpaid = get_unpaid_days(emp_ids, as_of) if settings.deduct_unpaid_days else {}
+	unpaid = get_unpaid_days(emp_ids, calc_dates) if settings.deduct_unpaid_days else {}
 	leaves = {}
 	if settings.include_leave_provision:
 		leaves = get_leave_balances([e for e in emp_ids if e in salaries], rule.leave_types, calc_dates)

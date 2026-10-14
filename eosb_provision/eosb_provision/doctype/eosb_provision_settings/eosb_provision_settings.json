@@ -84,7 +84,7 @@
    "fieldtype": "Check",
    "label": "Deduct Absent / Leave Without Pay Days",
    "default": "0",
-   "description": "يخصم أيام الغياب والإجازات بدون أجر (من الـ Attendance) من مدة الخدمة، زي HRMS Gratuity"
+   "description": "يخصم الأيام غير المدفوعة من مدة الخدمة زي HRMS Gratuity بالظبط، حسب Payroll Based On في Payroll Settings: Leave ← أيام On Leave بإجازة بدون أجر، Attendance ← أيام Absent"
   },
   {
    "fieldname": "days_in_month",
@@ -146,7 +146,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-12 15:00:00.000000",
+ "modified": "2026-10-14 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Settings",
