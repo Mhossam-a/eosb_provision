@@ -614,6 +614,21 @@ def get_provision_accounts(company, settings):
 	for f in ("default_provision_account", "leave_provision_account"):
 		if ca.get(f):
 			accounts.add(ca.get(f))
+	# الحسابات القديمة اللي اتقيد عليها قبل كده (لو حساب اتغير، النقل بين القديم والجديد بيصفّر بعضه)
+	accounts.update(
+		frappe.db.sql_list(
+			"""
+			select distinct d.provision_account from `tabEOSB Provision Detail` d
+			join `tabEOSB Provision` p on p.name = d.parent
+			where p.docstatus = 1 and p.company = %(company)s and ifnull(d.provision_account, '') != ''
+			union
+			select distinct e.leave_provision_account from `tabEOSB Provision Employee` e
+			join `tabEOSB Provision` p on p.name = e.parent
+			where p.docstatus = 1 and p.company = %(company)s and ifnull(e.leave_provision_account, '') != ''
+			""",
+			{"company": company},
+		)
+	)
 	return [a for a in accounts if a]
 
 
