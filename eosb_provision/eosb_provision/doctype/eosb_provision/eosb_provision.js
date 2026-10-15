@@ -15,7 +15,9 @@ frappe.ui.form.on("EOSB Provision", {
 				"btn-primary"
 			);
 			if ((frm.doc.employees || []).length) {
-				frm.add_custom_button(__("Calculate"), () => frm.events.calculate(frm));
+				frm.add_custom_button(__("Calculate"), () => {
+					frm.events.calculate(frm);
+				});
 			}
 		}
 		if (frm.doc.journal_entry) {
