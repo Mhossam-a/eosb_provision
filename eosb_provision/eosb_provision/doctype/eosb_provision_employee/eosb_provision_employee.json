@@ -105,7 +105,7 @@
   },
   {
    "fieldname": "earnings_note",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "Earnings Note",
    "read_only": 1
   },
@@ -205,7 +205,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-12 15:00:00.000000",
+ "modified": "2026-10-15 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Employee",

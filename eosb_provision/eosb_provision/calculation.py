@@ -167,20 +167,23 @@ def get_active_employees(company, as_of, department=None, employee=None, period_
 	mode = INCLUDE_UNTIL_RELIEVING: بيفضل يظهر لحد يوم الترك:
 	  - عنده Relieving Date بعد بداية الفترة ← بيتحسب لحد min(تاريخ المخصص، Relieving Date)
 	  - اللي ساب قبل بداية الفترة مايظهرش.
-	period_start = تاريخ آخر مخصص Submitted."""
+	period_start = تاريخ آخر مخصص Submitted.
+	employee = موظف واحد أو list موظفين (لما تحسب الموظفين اللي في الجدول بس)."""
+	employees = [employee] if isinstance(employee, str) else list(employee or [])
+	emp_cond = "and name in %(employees)s" if employees else ""
 	if (mode or EXCLUDE_RELIEVING) == EXCLUDE_RELIEVING:
 		rows = frappe.db.sql(
-			"""
+			f"""
 			select name, employee_name, department, date_of_joining, relieving_date, status
 			from `tabEmployee`
 			where status = 'Active' and relieving_date is null
 			  and company = %(company)s
 			  and date_of_joining <= %(as_of)s
 			  and (%(department)s is null or department = %(department)s)
-			  and (%(employee)s is null or name = %(employee)s)
+			  {emp_cond}
 			order by department, name
 			""",
-			{"company": company, "as_of": as_of, "department": department or None, "employee": employee or None},
+			{"company": company, "as_of": as_of, "department": department or None, "employees": tuple(employees) or ("",)},
 			as_dict=True,
 		)
 		for r in rows:
@@ -189,7 +192,7 @@ def get_active_employees(company, as_of, department=None, employee=None, period_
 
 	cutoff = getdate(period_start) if period_start else add_days(getdate(as_of), -1)
 	rows = frappe.db.sql(
-		"""
+		f"""
 		select name, employee_name, department, date_of_joining, relieving_date, status
 		from `tabEmployee`
 		where status in ('Active', 'Left')
@@ -200,7 +203,7 @@ def get_active_employees(company, as_of, department=None, employee=None, period_
 		  and company = %(company)s
 		  and date_of_joining <= %(as_of)s
 		  and (%(department)s is null or department = %(department)s)
-		  and (%(employee)s is null or name = %(employee)s)
+		  {emp_cond}
 		order by department, name
 		""",
 		{
@@ -208,7 +211,7 @@ def get_active_employees(company, as_of, department=None, employee=None, period_
 			"as_of": as_of,
 			"cutoff": cutoff,
 			"department": department or None,
-			"employee": employee or None,
+			"employees": tuple(employees) or ("",),
 		},
 		as_dict=True,
 	)
@@ -216,6 +219,38 @@ def get_active_employees(company, as_of, department=None, employee=None, period_
 	for r in rows:
 		r.calc_date = min(as_of, getdate(r.relieving_date)) if r.relieving_date else as_of
 	return rows
+
+
+def explain_not_eligible(employees, company, as_of, settings):
+	"""ليه الموظف ده مش داخل المخصص (لما تختاره بإيدك في الجدول)."""
+	out = {}
+	if not employees:
+		return out
+	mode = settings.get("relieving_date_handling") or EXCLUDE_RELIEVING
+	rows = frappe.get_all(
+		"Employee",
+		filters={"name": ("in", list(employees))},
+		fields=["name", "company", "status", "date_of_joining", "relieving_date"],
+	)
+	for e in rows:
+		if e.company != company:
+			reason = _("تبع شركة {0}").format(e.company)
+		elif e.date_of_joining and getdate(e.date_of_joining) > getdate(as_of):
+			reason = _("تاريخ التعيين {0} بعد تاريخ المخصص").format(frappe.format(e.date_of_joining, "Date"))
+		elif e.relieving_date and mode == EXCLUDE_RELIEVING:
+			reason = _("عنده Relieving Date {0}، والإعدادات على Exclude once Relieving Date is set").format(
+				frappe.format(e.relieving_date, "Date")
+			)
+		elif e.relieving_date:
+			reason = _("ساب الشغل {0} قبل بداية الفترة").format(frappe.format(e.relieving_date, "Date"))
+		elif e.status != "Active":
+			reason = _("حالته {0} مش Active").format(e.status)
+		else:
+			reason = _("مش مستوفي شروط المخصص")
+		out[e.name] = reason
+	for emp in employees:
+		out.setdefault(emp, _("الموظف مش موجود"))
+	return out
 
 
 def get_salary_components(employees, components, company, as_of):
@@ -284,48 +319,123 @@ def get_ssa(employee, company, on_date):
 	return None, None
 
 
+class FormulaError(Exception):
+	pass
+
+
+def _formula_globals():
+	from datetime import date
+	from math import ceil, floor
+
+	from frappe.utils import get_first_day, get_last_day, rounded
+
+	# نفس الدوال المسموحة في معادلات HRMS (Salary Slip.whitelisted_globals)
+	return {
+		"int": int,
+		"float": float,
+		"long": int,
+		"round": round,
+		"rounded": rounded,
+		"date": date,
+		"getdate": getdate,
+		"get_first_day": get_first_day,
+		"get_last_day": get_last_day,
+		"ceil": ceil,
+		"floor": floor,
+	}
+
+
+def _sanitize(expr):
+	"""زي hrms.payroll.utils.sanitize_expression: يشيل المسافات ويخلي المعادلة سطر واحد."""
+	if not expr:
+		return None
+	return " ".join(expr.strip().splitlines())
+
+
+def _safe_eval(code, data):
+	"""نفس تقييم HRMS للمعادلات (eval محمي من غير builtins)."""
+	import unicodedata
+
+	from frappe.utils.safe_exec import UNSAFE_ATTRIBUTES
+
+	code = unicodedata.normalize("NFKC", code)
+	for attr in set(UNSAFE_ATTRIBUTES).union(["__"]) - {"format"}:
+		if attr in code:
+			raise SyntaxError(f"Illegal rule {code}. Cannot use {attr}")
+	g = _formula_globals()
+	g["__builtins__"] = {}
+	return eval(code, g, data)  # nosemgrep
+
+
+def _period(structure, on_date, company):
+	try:
+		from hrms.payroll.doctype.payroll_entry.payroll_entry import get_start_end_dates
+
+		d = get_start_end_dates(structure.payroll_frequency or "Monthly", on_date, company)
+		return getdate(d.start_date), getdate(d.end_date)
+	except Exception:
+		from frappe.utils import get_first_day, get_last_day
+
+		return getdate(get_first_day(on_date)), getdate(get_last_day(on_date))
+
+
 def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
-	"""يحسب مكونات الـ Earnings من الـ Salary Structure بمعادلاتها و Base / Variable بتوع الـ Assignment،
-	بنفس كود HRMS اللي بيستخدمه الـ Salary Slip (من غير ما يعمل Salary Slip).
-	يرجع {salary_component: default_amount} (المبلغ الكامل للشهر من غير تقسيم أيام)."""
-	ssa_doc = frappe.get_doc("Salary Structure Assignment", ssa_name)
+	"""يحسب مكونات الـ Earnings من الـ Salary Structure بمعادلاتها و Base / Variable بتوع الـ Assignment.
+	نفس طريقة HRMS بالظبط (السياق: كل اختصارات المكونات = 0، حقول الـ Salary Slip،
+	حقول الـ Assignment زي base و variable، حقول الموظف، وفترة شهر كاملة من غير غياب)،
+	بس من غير ما يعتمد على كلاس الـ Salary Slip، عشان أي أبلكيشن بيعدّل عليه مايبوظش الحسبة.
+	يرجع {salary_component: amount} (المبلغ الكامل للشهر)."""
+	ssa = frappe.get_doc("Salary Structure Assignment", ssa_name)
+	structure = frappe.get_cached_doc("Salary Structure", ssa.salary_structure)
 
-	# HRMS v16+: الـ Assignment نفسه بيقيّم المعادلات
-	if hasattr(ssa_doc, "get_evaluated_components"):
-		rows = ssa_doc.get_evaluated_components().earnings
-		out = {}
-		for r in rows:
-			if r.get("statistical_component"):
-				continue
-			out[r.salary_component] = out.get(r.salary_component, 0) + flt(r.get("default_amount"))
-		return out
-
-	# HRMS v15: نفس دوال الـ Salary Slip، للـ Earnings بس (من غير ضرايب ولا Additional Salary)
-	structure = frappe.get_cached_doc("Salary Structure", ssa_doc.salary_structure)
-	slip = frappe.new_doc("Salary Slip")
-	slip.update(
+	data = frappe._dict()
+	for abbr in frappe.get_all("Salary Component", pluck="salary_component_abbr"):
+		if abbr:
+			data[abbr] = 0
+	for df in frappe.get_meta("Salary Slip").fields:
+		if df.fieldtype not in ("Table", "Table MultiSelect", "Section Break", "Column Break", "Tab Break", "HTML", "Button"):
+			data.setdefault(df.fieldname, None)
+	data.update(ssa.as_dict())
+	data.update(frappe.get_cached_doc("Employee", employee).as_dict())
+	start, end = _period(structure, on_date, company)
+	days = date_diff(end, start) + 1
+	data.update(
 		{
 			"employee": employee,
-			"employee_name": frappe.get_cached_value("Employee", employee, "employee_name"),
 			"company": company,
-			"salary_structure": ssa_doc.salary_structure,
+			"salary_structure": ssa.salary_structure,
 			"payroll_frequency": structure.payroll_frequency,
-			"posting_date": on_date,
-			"start_date": on_date,
-			"end_date": on_date,
-			"total_working_days": 30,
-			"payment_days": 30,
-			"salary_slip_based_on_timesheet": 0,
+			"start_date": start,
+			"end_date": end,
+			"posting_date": end,
+			"payment_days": days,
+			"total_working_days": days,
+			"leave_without_pay": 0,
+			"absent_days": 0,
+			"unmarked_days": 0,
 		}
 	)
-	slip._salary_structure_assignment = frappe.db.get_value(
-		"Salary Structure Assignment", ssa_name, "*", as_dict=True
-	)
-	slip.set_salary_structure_doc()
-	slip.add_structure_components("earnings")
+
 	out = {}
-	for r in slip.earnings:
-		out[r.salary_component] = out.get(r.salary_component, 0) + flt(r.default_amount or r.amount)
+	for row in structure.get("earnings") or []:
+		condition, formula = _sanitize(row.condition), _sanitize(row.formula)
+		try:
+			if condition and not _safe_eval(condition, data):
+				continue
+			amount = flt(row.amount)
+			if row.amount_based_on_formula and formula:
+				amount = flt(_safe_eval(formula, data), row.precision("amount"))
+		except Exception as e:
+			raise FormulaError(
+				_("معادلة {0} ({1}) في {2}: {3}").format(
+					row.salary_component, row.abbr, structure.name, f"{type(e).__name__}: {e}"
+				)
+			)
+		if row.abbr:
+			data[row.abbr] = amount
+		if row.statistical_component:
+			continue
+		out[row.salary_component] = flt(out.get(row.salary_component, 0) + amount, 2)
 	return out
 
 
@@ -346,15 +456,22 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 	def from_ssa(emp):
 		ssa, note = get_ssa(emp, company, calc_dates.get(emp) or as_of)
 		if not ssa:
+			errors[emp] = _("مالوش Salary Structure Assignment (Submitted) في الشركة دي")
 			return None
 		try:
 			amounts = evaluate_ssa_earnings(ssa.name, emp, company, calc_dates.get(emp) or as_of)
 		except Exception as e:
 			frappe.clear_last_message()
-			errors[emp] = _("خطأ في معادلات {0}: {1}").format(ssa.salary_structure, frappe.utils.strip_html(str(e))[:200])
+			errors[emp] = _("خطأ في {0}: {1}").format(ssa.name, frappe.utils.strip_html(str(e))[:250])
 			return None
 		comps = {c: flt(a, 2) for c, a in amounts.items() if c in comp_set and flt(a)}
 		if not comps:
+			if not flt(ssa.base):
+				errors[emp] = _("الـ Base في {0} = صفر").format(ssa.name)
+			else:
+				errors[emp] = _("الـ Salary Structure «{0}» (في {1}) مفيهاش أي مكوّن من مكونات الـ Gratuity Rule بقيمة: مكوناتها {2}").format(
+					ssa.salary_structure, ssa.name, "، ".join(c for c in amounts) or "-"
+				)
 			return None
 		return {"source": SOURCE_SSA, "ref": ssa.name, "components": comps, "note": note}
 
@@ -366,6 +483,8 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 			slips = get_slip_earnings(employees, components, company, as_of)
 		sal = slips.get(emp)
 		if not sal or not sum(sal["components"].values()):
+			msg = _("مالوش Salary Slip (Submitted) فيها مكونات الـ Gratuity Rule")
+			errors[emp] = f"{errors[emp]} · {msg}" if errors.get(emp) else msg
 			return None
 		return {"source": SOURCE_SLIP, "ref": sal["slip"], "components": sal["components"], "note": None}
 
@@ -375,7 +494,8 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 		if not res:
 			res = order[1](emp)
 			if res:
-				res["note"] = (res["note"] + " · " if res["note"] else "") + _("اتاخد من {0}").format(res["source"])
+				why = f" ({errors[emp]})" if errors.get(emp) else ""
+				res["note"] = (res["note"] + " · " if res["note"] else "") + _("اتاخد من {0}").format(res["source"]) + why
 		if res:
 			out[emp] = res
 			errors.pop(emp, None)

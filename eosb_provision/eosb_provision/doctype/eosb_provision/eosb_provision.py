@@ -15,10 +15,26 @@ from eosb_provision.eosb_provision import calculation as calc
 
 
 class EOSBProvision(Document):
-	# ------------------------------------------------------------ Get Employees
+	# ------------------------------------------------------------ Get Employees / Calculate
 	@frappe.whitelist()
 	def get_employees(self):
-		"""يملى الجدول بالموظفين الـ Active (من غير Relieving Date) ويحسب المستحق والمحجوز والتسوية."""
+		"""يملى الجدول بكل الموظفين اللي عليهم مخصص ويحسبهم (بيمسح الجدول القديم)."""
+		return self.calculate_rows(None, update_notes=True)
+
+	@frappe.whitelist()
+	def calculate(self, employees=None):
+		"""يحسب الموظفين اللي في الجدول بس (من غير ما يجيب الكل من الأول).
+		employees: موظف أو list (لما تختار موظف في الجدول بيتحسب لوحده)."""
+		if isinstance(employees, str):
+			employees = frappe.parse_json(employees) if employees.strip().startswith("[") else [employees]
+		partial = bool(employees)
+		employees = employees or [e.employee for e in self.employees if e.employee]
+		employees = list(dict.fromkeys(e for e in employees if e))
+		if not employees:
+			frappe.throw(_("ضيف موظفين في الجدول أو اضغط Get Employees"))
+		return self.calculate_rows(employees, update_notes=not partial)
+
+	def calculate_rows(self, employees=None, update_notes=True):
 		if not self.company or not self.posting_date:
 			frappe.throw(_("اختار الشركة والتاريخ الأول"))
 
@@ -28,44 +44,60 @@ class EOSBProvision(Document):
 			(self.company, self.posting_date, self.name or ""),
 		)[0][0]
 		rows, skipped, rule, settings = calc.compute_employees(
-			self.company, self.posting_date, self.department, period_start=period_start
+			self.company,
+			self.posting_date,
+			None if employees else self.department,
+			employee=employees,
+			period_start=period_start,
 		)
+		reasons = dict(frappe.flags.get("eosb_skipped_reasons") or {})
+		skipped = list(skipped)
+		if employees:
+			found = {r.employee for r in rows} | set(skipped)
+			missing = [e for e in employees if e not in found]
+			reasons.update(calc.explain_not_eligible(missing, self.company, self.posting_date, settings))
+			skipped += missing
 		self.gratuity_rule = rule.name
-		self.set("employees", [])
-		self.set("details", [])
 
+		new_rows = {r.employee: self.employee_row(r) for r in rows}
+		if employees:
+			targets = set(employees)
+			kept = []
+			for e in self.employees:
+				if not e.employee:
+					continue
+				if e.employee in new_rows:
+					kept.append(new_rows.pop(e.employee))
+				elif e.employee not in targets:
+					kept.append(
+						{k: v for k, v in e.as_dict().items() if k not in ("name", "idx", "parent", "parentfield", "parenttype", "doctype")}
+					)
+			kept.extend(new_rows.values())
+			details = [
+				{k: v for k, v in d.as_dict().items() if k not in ("name", "idx", "parent", "parentfield", "parenttype", "doctype")}
+				for d in self.details
+				if d.employee not in targets and not d.is_reversal
+			]
+		else:
+			kept = list(new_rows.values())
+			details = []
 		for r in rows:
 			for c in r.components:
-				self.append("details", dict(c, employee=r.employee))
-			self.append(
-				"employees",
-				{
-					"employee": r.employee,
-					"employee_name": r.employee_name,
-					"department": r.department,
-					"date_of_joining": r.date_of_joining,
-					"relieving_date": r.relieving_date,
-					"service_days": r.service_days,
-					"service_text": r.service_text,
-					"number_of_years": r.number_of_years,
-					"salary_slip": r.salary_slip,
-					"salary_structure_assignment": r.salary_structure_assignment,
-					"earnings_note": r.earnings_note,
-					"components": r.components_text,
-					"last_salary": r.last_salary,
-					"allocated_amount": r.allocated_amount,
-					"slab_details": r.slab_details,
-					"leave_balance": r.leave_balance,
-					"day_salary": r.day_salary,
-					"total_leave_amount": r.total_leave_amount,
-				},
-			)
+				details.append(dict(c, employee=r.employee))
 
+		self.set("employees", [])
+		for e in kept:
+			self.append("employees", e)
+		self.set("details", [])
+		for d in details:
+			self.append("details", d)
+
+		days = "360 (KSA Labor Law: الشهر 30 يوم)" if rule.method == calc.KSA_METHOD else rule.days_per_year
 		notes = [
 			_("Gratuity Rule: {0} · Work Experience: {1} · Days/Year: {2} · Leave Types: {3} · Earnings: {4}").format(
 				rule.name,
 				rule.method or "-",
-				rule.days_per_year,
+				days,
 				", ".join(rule.leave_types) or "-",
 				settings.get("earnings_source") or calc.SOURCE_SSA,
 			)
@@ -78,16 +110,55 @@ class EOSBProvision(Document):
 				).format(", ".join(leavers))
 			)
 		if skipped:
-			reasons = frappe.flags.get("eosb_skipped_reasons") or {}
-			notes.append(
-				_("موظفين اتخطوا (رصيدهم المحجوز زي ما هو):")
-				+ "\n"
-				+ "\n".join(f"- {e}: {reasons.get(e, '')}" for e in skipped)
+			names = dict(
+				frappe.get_all("Employee", filters={"name": ("in", skipped)}, fields=["name", "employee_name"], as_list=True)
 			)
-		self.notes = "\n".join(notes)
+			notes.append(
+				_("موظفين مااتحسبوش (رصيدهم المحجوز زي ما هو):")
+				+ "\n"
+				+ "\n".join(f"- {e} {names.get(e) or ''}: {reasons.get(e, '')}" for e in skipped)
+			)
+		if update_notes:
+			self.notes = "\n".join(notes)
 		self.apply_booked()
 		self.set_totals()
 		return notes
+
+	@staticmethod
+	def employee_row(r):
+		return {
+			"employee": r.employee,
+			"employee_name": r.employee_name,
+			"department": r.department,
+			"date_of_joining": r.date_of_joining,
+			"relieving_date": r.relieving_date,
+			"service_days": r.service_days,
+			"service_text": r.service_text,
+			"number_of_years": r.number_of_years,
+			"salary_slip": r.salary_slip,
+			"salary_structure_assignment": r.salary_structure_assignment,
+			"earnings_note": r.earnings_note,
+			"components": r.components_text,
+			"last_salary": r.last_salary,
+			"allocated_amount": r.allocated_amount,
+			"slab_details": r.slab_details,
+			"leave_balance": r.leave_balance,
+			"day_salary": r.day_salary,
+			"total_leave_amount": r.total_leave_amount,
+		}
+
+	def calculate_missing_rows(self):
+		"""موظفين اتضافوا في الجدول بإيدك ومااتحسبوش: بيتحسبوا وقت الـ Save."""
+		self.set("employees", [e for e in self.employees if e.employee])
+		done = {d.employee for d in self.details}
+		missing = [e.employee for e in self.employees if e.employee not in done]
+		if not missing:
+			return
+		notes = self.calculate_rows(missing, update_notes=False)
+		dropped = [e for e in missing if e not in {x.employee for x in self.employees}]
+		if dropped and len(notes) > 1:
+			frappe.msgprint("<br>".join(frappe.utils.escape_html(n).replace("\n", "<br>") for n in notes[1:]),
+				title=_("موظفين اتشالوا من الجدول"), indicator="orange")
 
 	# ------------------------------------------------------------ booked / adjustment
 	def apply_booked(self):
@@ -175,6 +246,8 @@ class EOSBProvision(Document):
 	def validate(self):
 		if self.docstatus == 0:
 			self.status = "Draft"
+			if self.company and self.posting_date:
+				self.calculate_missing_rows()
 		self.sync_opening_amounts()
 		if self.details:
 			self.apply_booked()
@@ -183,6 +256,10 @@ class EOSBProvision(Document):
 	def before_submit(self):
 		if not self.employees:
 			frappe.throw(_("اضغط Get Employees الأول"))
+		done = {d.employee for d in self.details}
+		not_done = [e.employee for e in self.employees if e.employee not in done]
+		if not_done:
+			frappe.throw(_("الموظفين دول مااتحسبوش، اضغط Calculate: {0}").format(", ".join(not_done)))
 		self.validate_order()
 		if not self.is_opening:
 			# Accounts Frozen Till Date: نفس فحص ERPNext، قبل ما يتعمل القيد
