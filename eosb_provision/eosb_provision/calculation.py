@@ -397,8 +397,10 @@ def evaluate_ssa_earnings(ssa_name, employee, company, on_date, trace=None):
 	for df in frappe.get_meta("Salary Slip").fields:
 		if df.fieldtype not in ("Table", "Table MultiSelect", "Section Break", "Column Break", "Tab Break", "HTML", "Button"):
 			data.setdefault(df.fieldname, None)
-	data.update(ssa.as_dict())
+	# الموظف الأول وبعده الـ Assignment: HRMS بيعمل self.update(ssa) على الـ Salary Slip نفسها فبتكسب على الموظف،
+	# وبدون كده أي حقل custom على الـ Employee اسمه base أو variable (قيمته صفر) كان بيصفّر كل المعادلات
 	data.update(frappe.get_cached_doc("Employee", employee).as_dict())
+	data.update(ssa.as_dict())
 	start, end = _period(structure, on_date, company)
 	days = date_diff(end, start) + 1
 	data.update(

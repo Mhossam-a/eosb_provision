@@ -122,7 +122,7 @@
   {
    "fieldname": "last_salary",
    "fieldtype": "Currency",
-   "label": "Last Salary",
+   "label": "Salary",
    "read_only": 1,
    "in_list_view": 1,
    "columns": 1
@@ -205,7 +205,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-15 10:00:00.000000",
+ "modified": "2026-10-15 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Employee",
