@@ -7,6 +7,8 @@ APP_CUSTOM_FIELDS = {
 	"Journal Entry": ["eosb_provision"],
 }
 LEGACY_PROVISION = "custom_gratuity_payable_account"
+RULE_METHOD_FIELD = "work_experience_calculation_function"
+KSA_OPTION = "KSA Labor Law"
 
 
 def after_install():
@@ -44,6 +46,29 @@ def after_install():
 		update=True,
 	)
 	migrate_legacy_component_accounts()
+	add_ksa_work_experience_option()
+
+
+def add_ksa_work_experience_option():
+	"""يضيف "KSA Labor Law" لقايمة Work Experience Calculation Function في الـ Gratuity Rule
+	(الحسبة بتاعتها موجودة في calculation.get_service). بيتعمل Property Setter، وبيتكرر عادي مع كل migrate."""
+	field = frappe.get_meta("Gratuity Rule").get_field(RULE_METHOD_FIELD)
+	if not field:
+		return
+	options = [o for o in (field.options or "").split("\n") if o]
+	if KSA_OPTION in options:
+		return
+	frappe.make_property_setter(
+		{
+			"doctype": "Gratuity Rule",
+			"fieldname": RULE_METHOD_FIELD,
+			"property": "options",
+			"value": "\n".join(options + [KSA_OPTION]),
+			"property_type": "Text",
+		},
+		validate_fields_for_doctype=False,
+	)
+	frappe.clear_cache(doctype="Gratuity Rule")
 
 
 def migrate_legacy_component_accounts():
@@ -89,3 +114,18 @@ def before_uninstall():
 				frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
 	frappe.clear_cache(doctype="Salary Component")
 	frappe.clear_cache(doctype="Journal Entry")
+
+	# نشيل "KSA Labor Law" من قايمة الـ Gratuity Rule، والـ Rules اللي مختارينها ترجع للافتراضي
+	setter = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Gratuity Rule", "field_name": RULE_METHOD_FIELD, "property": "options"},
+	)
+	if setter:
+		options = (frappe.db.get_value("Property Setter", setter, "value") or "").split("\n")
+		if KSA_OPTION in options:
+			frappe.db.set_value(
+				"Gratuity Rule", {RULE_METHOD_FIELD: KSA_OPTION}, RULE_METHOD_FIELD, "Round off Work Experience"
+			)
+			remaining = [o for o in options if o and o != KSA_OPTION]
+			frappe.db.set_value("Property Setter", setter, "value", "\n".join(remaining))
+			frappe.clear_cache(doctype="Gratuity Rule")

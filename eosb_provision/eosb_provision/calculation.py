@@ -379,12 +379,14 @@ def _period(structure, on_date, company):
 		return getdate(get_first_day(on_date)), getdate(get_last_day(on_date))
 
 
-def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
+def evaluate_ssa_earnings(ssa_name, employee, company, on_date, trace=None):
 	"""يحسب مكونات الـ Earnings من الـ Salary Structure بمعادلاتها و Base / Variable بتوع الـ Assignment.
 	نفس طريقة HRMS بالظبط (السياق: كل اختصارات المكونات = 0، حقول الـ Salary Slip،
 	حقول الـ Assignment زي base و variable، حقول الموظف، وفترة شهر كاملة من غير غياب)،
 	بس من غير ما يعتمد على كلاس الـ Salary Slip، عشان أي أبلكيشن بيعدّل عليه مايبوظش الحسبة.
-	يرجع {salary_component: amount} (المبلغ الكامل للشهر)."""
+	يرجع {salary_component: amount} (المبلغ الكامل للشهر).
+	trace: list اختياري، بيتحط فيه (salary_component, سبب) للمكونات اللي اتخطت (Condition مااتحققتش أو Statistical)،
+	عشان نعرف ليه مكوّن مش ظاهر في النتيجة."""
 	ssa = frappe.get_doc("Salary Structure Assignment", ssa_name)
 	structure = frappe.get_cached_doc("Salary Structure", ssa.salary_structure)
 
@@ -421,6 +423,8 @@ def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
 		condition, formula = _sanitize(row.condition), _sanitize(row.formula)
 		try:
 			if condition and not _safe_eval(condition, data):
+				if trace is not None:
+					trace.append((row.salary_component, _("الـ Condition مااتحققتش: {0}").format(condition)))
 				continue
 			amount = flt(row.amount)
 			if row.amount_based_on_formula and formula:
@@ -434,6 +438,8 @@ def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
 		if row.abbr:
 			data[row.abbr] = amount
 		if row.statistical_component:
+			if trace is not None:
+				trace.append((row.salary_component, _("Statistical Component (مش بيتحسب في الأجر)")))
 			continue
 		out[row.salary_component] = flt(out.get(row.salary_component, 0) + amount, 2)
 	return out
@@ -442,6 +448,32 @@ def evaluate_ssa_earnings(ssa_name, employee, company, on_date):
 def get_slip_earnings(employees, components, company, as_of):
 	"""آخر Salary Slip عاملة Submit، فترتها بدأت في التاريخ أو قبله، ومكونات الـ Rule بس."""
 	return get_salary_components(employees, components, company, as_of)
+
+
+def no_rule_component_message(ssa, amounts, trace, rule_components):
+	"""ليه الـ Structure مطلعش أجر من مكونات الـ Gratuity Rule: بيقارن الاتنين ويقول السبب بالظبط."""
+	in_both = [c for c in amounts if c in rule_components]  # موجود في الاتنين (قيمته صفر)
+	cond_false = [c for c, _why in trace if c in rule_components]
+	lines = [
+		_("الـ Salary Structure «{0}» (في {1}) مطلعش أجر من مكونات الـ Gratuity Rule.").format(ssa.salary_structure, ssa.name)
+	]
+	if in_both:
+		lines.append(
+			_("المكونات دي موجودة في الـ Rule والـ Structure لكن قيمتها صفر (راجع الـ Formula): {0}").format(
+				"، ".join(in_both)
+			)
+		)
+	if cond_false:
+		lines.append(_("المكونات دي في الـ Rule بس الـ Condition بتاعتها في الـ Structure مااتحققتش: {0}").format("، ".join(cond_false)))
+	if not in_both and not cond_false:
+		lines.append(_("مفيش أي مكوّن في الـ Structure اسمه زي أي مكوّن في الـ Rule (الأسامي لازم تتطابق بالحرف)."))
+	lines.append(_("مكونات الـ Rule (Applicable Earnings Component): {0}").format("، ".join(sorted(rule_components)) or "-"))
+	lines.append(
+		_("مكونات الـ Structure بقيمها: {0}").format("، ".join(f"{c} = {flt(a):,.2f}" for c, a in amounts.items()) or "-")
+	)
+	if trace:
+		lines.append(_("مكونات اتخطت: {0}").format("، ".join(f"{c} ({why})" for c, why in trace)))
+	return "\n".join(lines)
 
 
 def get_earnings(employees, calc_dates, components, company, as_of, source=None):
@@ -458,8 +490,9 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 		if not ssa:
 			errors[emp] = _("مالوش Salary Structure Assignment (Submitted) في الشركة دي")
 			return None
+		trace = []
 		try:
-			amounts = evaluate_ssa_earnings(ssa.name, emp, company, calc_dates.get(emp) or as_of)
+			amounts = evaluate_ssa_earnings(ssa.name, emp, company, calc_dates.get(emp) or as_of, trace)
 		except Exception as e:
 			frappe.clear_last_message()
 			errors[emp] = _("خطأ في {0}: {1}").format(ssa.name, frappe.utils.strip_html(str(e))[:250])
@@ -469,9 +502,7 @@ def get_earnings(employees, calc_dates, components, company, as_of, source=None)
 			if not flt(ssa.base):
 				errors[emp] = _("الـ Base في {0} = صفر").format(ssa.name)
 			else:
-				errors[emp] = _("الـ Salary Structure «{0}» (في {1}) مفيهاش أي مكوّن من مكونات الـ Gratuity Rule بقيمة: مكوناتها {2}").format(
-					ssa.salary_structure, ssa.name, "، ".join(c for c in amounts) or "-"
-				)
+				errors[emp] = no_rule_component_message(ssa, amounts, trace, comp_set)
 			return None
 		return {"source": SOURCE_SSA, "ref": ssa.name, "components": comps, "note": note}
 

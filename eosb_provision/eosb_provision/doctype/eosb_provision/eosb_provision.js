@@ -61,9 +61,17 @@ frappe.ui.form.on("EOSB Provision", {
 			freeze: true,
 			freeze_message: __("جاري الحساب..."),
 			callback(r) {
-				frm.dirty();
-				frm.refresh();
-				frm.events.show_notes(frm, r.message || [], !employees);
+				try {
+					frm.dirty();
+					frm.refresh();
+					frm.events.show_notes(frm, r.message || [], !employees);
+				} finally {
+					// لو حصل أي JS error وقت التحديث، الشاشة ماتفضلش متجمدة
+					frappe.dom.unfreeze();
+				}
+			},
+			error() {
+				frappe.dom.unfreeze();
 			},
 		});
 	},
@@ -126,6 +134,10 @@ frappe.ui.form.on("EOSB Provision Employee", {
 			frappe.model.set_value(cdt, cdn, "employee", "");
 			return;
 		}
-		frm.events.calculate(frm, [row.employee]);
+		// نقفل نافذة تعديل الصف قبل الحسبة: السيرفر بيرجّع الجدول كله بصفوف جديدة،
+		// ولو النافذة مفتوحة بتفضل ماسكة صف اتشال وده اللي كان بيجمّد الصفحة
+		const grid_row = frm.fields_dict.employees.grid.grid_rows_by_docname[cdn];
+		if (grid_row && grid_row.grid_form) grid_row.toggle_view(false);
+		setTimeout(() => frm.events.calculate(frm, [row.employee]), 0);
 	},
 });
