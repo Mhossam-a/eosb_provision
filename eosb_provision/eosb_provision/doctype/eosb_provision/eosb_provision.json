@@ -62,7 +62,7 @@
    "fieldname": "is_opening",
    "fieldtype": "Check",
    "label": "Is Opening",
-   "description": "قيد افتتاحي: بيسجل الرصيد القديم كأساس من غير ما يعمل قيد. والحسبة بتبدأ من بعده"
+   "description": "مخصص افتتاحي: بيسجل الرصيد القديم لكل موظف كأساس، والحسبة بتبدأ من بعده. القيد حسب Opening Provision في الإعدادات (Record only = من غير قيد)"
   },
   {
    "fieldname": "column_break_h1",
@@ -203,7 +203,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-12 15:00:00.000000",
+ "modified": "2026-10-15 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision",

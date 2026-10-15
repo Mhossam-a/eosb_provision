@@ -35,7 +35,12 @@ def execute(filters=None):
 	for (emp, _comp), b in booked.items():
 		eosb_booked[emp] = eosb_booked.get(emp, 0) + flt(b.required_amount)
 
-	gl = calc.get_gl_balances(filters.company, as_of, calc.get_provision_accounts(filters.company, settings))
+	provision_accounts = calc.get_provision_accounts(filters.company, settings)
+	gl = calc.get_gl_balances(filters.company, as_of, provision_accounts)
+	gl_accounts = calc.get_gl_account_balances(filters.company, as_of, provision_accounts)
+	booked_total = flt(
+		sum(eosb_booked.values()) + sum(flt(b.get("amount")) for b in leave_booked.values()), 2
+	)
 
 	# الموظفين اللي مش في الحسبة اللحظية بس ليهم رصيد محجوز (سابوا / عندهم Relieving Date / مالهمش Slip)
 	others = set(eosb_booked) | set(leave_booked) | set(gl)
@@ -103,9 +108,11 @@ def execute(filters=None):
 		)
 
 	columns = get_columns()
-	summary = get_summary(data)
+	gl_total = flt(sum(gl_accounts.values()), 2)
+	summary = get_summary(data, gl_total, booked_total)
 	chart = get_chart(data)
-	return columns, data, None, chart, summary
+	message = get_reconciliation(gl_accounts, gl_total, booked_total)
+	return columns, data, message, chart, summary
 
 
 def get_columns():
@@ -136,13 +143,41 @@ def get_columns():
 	]
 
 
-def get_summary(data):
+def get_reconciliation(gl_accounts, gl_total, booked_total):
+	"""مطابقة على مستوى الحساب: رصيد حسابات المخصص في الـ GL (القديم المجمّع + حركات الأبلكيشن)
+	مقابل المحجوز في الأبلكيشن لكل الموظفين (للشركة كلها، بغض النظر عن الفلاتر)."""
+	diff = flt(gl_total - booked_total, 2)
+	rows = "".join(
+		f"<tr><td>{frappe.utils.escape_html(acc)}</td><td style='text-align:end'>{bal:,.2f}</td></tr>"
+		for acc, bal in sorted(gl_accounts.items())
+	)
+	color = "green" if not diff else "orange"
+	return (
+		"<div style='margin-bottom:12px'>"
+		f"<b>{_('مطابقة مع الـ GL (على مستوى الحساب، الشركة كلها)')}</b>"
+		f"<table class='table table-bordered' style='max-width:720px;margin:6px 0'>{rows}"
+		f"<tr><td><b>{_('إجمالي رصيد الـ GL')}</b></td><td style='text-align:end'><b>{gl_total:,.2f}</b></td></tr>"
+		f"<tr><td><b>{_('إجمالي المحجوز في الأبلكيشن')}</b></td><td style='text-align:end'><b>{booked_total:,.2f}</b></td></tr>"
+		f"<tr><td><b>{_('الفرق (GL − المحجوز)')}</b></td>"
+		f"<td style='text-align:end;color:{color}'><b>{diff:,.2f}</b></td></tr></table>"
+		f"<span class='text-muted'>{_('لو الفرق ثابت من أول المخصص الافتتاحي فهو فرق الافتتاحي (الرصيد القديم − مجموع افتتاحي الموظفين) ويتقفل بقيد تسوية واحد.')}</span>"
+		"</div>"
+	)
+
+
+def get_summary(data, gl_total=0, booked_total=0):
 	s = lambda f: flt(sum(flt(d.get(f)) for d in data), 2)  # noqa: E731
 	return [
 		{"value": s("eosb_live") + s("leave_live"), "label": _("الالتزام المستحق (نهاية خدمة + إجازات)"), "datatype": "Currency", "indicator": "Blue"},
 		{"value": s("total_booked"), "label": _("المحجوز في المخصصات"), "datatype": "Currency", "indicator": "Green"},
 		{"value": s("eosb_unbooked") + s("leave_unbooked"), "label": _("لسه ماتقيدش"), "datatype": "Currency", "indicator": "Orange"},
-		{"value": s("gl_balance"), "label": _("رصيد الـ GL بالموظفين"), "datatype": "Currency", "indicator": "Gray"},
+		{"value": gl_total, "label": _("رصيد الـ GL (حسابات المخصص)"), "datatype": "Currency", "indicator": "Gray"},
+		{
+			"value": flt(gl_total - booked_total, 2),
+			"label": _("فرق GL عن المحجوز"),
+			"datatype": "Currency",
+			"indicator": "Red" if flt(gl_total - booked_total, 2) else "Green",
+		},
 	]
 
 

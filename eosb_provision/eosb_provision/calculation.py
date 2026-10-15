@@ -27,6 +27,11 @@ SUM_OF_SLABS = "Sum of all previous slabs"
 SOURCE_SSA = "Salary Structure Assignment"
 SOURCE_SLIP = "Last Salary Slip"
 AS_PER_RULE = "As per Gratuity Rule"
+LEAVE_OFF = "Disabled"
+LEAVE_CALC = "Calculate only"
+LEAVE_POST = "Calculate and post"
+OPENING_RECORD = "Record only"
+OPENING_POST = "Post entry"
 
 
 # ------------------------------------------------------------------ settings / rule
@@ -42,6 +47,20 @@ def get_company_accounts(settings, company):
 		if row.company == company:
 			return row
 	return frappe._dict()
+
+
+def leave_mode(settings):
+	"""Disabled: مفيش إجازات. Calculate only: بتتحسب وبتظهر في الشاشة والتقرير من غير قيد.
+	Calculate and post: بتتحسب وبتدخل القيد. لو الخيار الجديد فاضي (إعدادات قديمة) بنقرا الـ checkbox القديم."""
+	mode = settings.get("leave_provision_mode")
+	if mode in (LEAVE_OFF, LEAVE_CALC, LEAVE_POST):
+		return mode
+	return LEAVE_POST if settings.get("include_leave_provision") else LEAVE_OFF
+
+
+def opening_mode(settings):
+	"""Record only (الافتراضي): الافتتاحي من غير قيد. Post entry: الافتتاحي بيعمل قيد على حساب مقابل."""
+	return OPENING_POST if settings.get("opening_mode") == OPENING_POST else OPENING_RECORD
 
 
 def load_rule(rule_name):
@@ -631,7 +650,7 @@ def compute_employees(
 	)
 	unpaid = get_unpaid_days(emp_ids, calc_dates) if settings.deduct_unpaid_days else {}
 	leaves = {}
-	if settings.include_leave_provision:
+	if leave_mode(settings) != LEAVE_OFF:
 		leaves = get_leave_balances([e for e in emp_ids if e in salaries], rule.leave_types, calc_dates)
 	days_in_month = flt(settings.days_in_month) or 30
 
@@ -744,6 +763,7 @@ def get_booked(company, as_of, exclude=None):
 			join `tabEOSB Provision` p on p.name = e.parent
 			where p.docstatus = 1 and p.company = %(company)s
 			  and p.posting_date <= %(as_of)s and p.name != %(exclude)s
+			  and ifnull(e.leave_provision_account, '') != ''
 		) x
 		where rn = 1
 		""",
@@ -801,6 +821,25 @@ def get_gl_balances(company, as_of, accounts):
 		as_dict=True,
 	)
 	return {r.party: flt(r.balance) for r in rows}
+
+
+def get_gl_account_balances(company, as_of, accounts):
+	"""رصيد كل حساب مخصص في الـ GL (دائن − مدين) للحساب كله، بغض النظر عن الموظف (Party).
+	ده اللي بنطابق عليه: الرصيد القديم المجمّع + حركات الأبلكيشن."""
+	if not accounts:
+		return {}
+	rows = frappe.db.sql(
+		"""
+		select account, sum(credit - debit) as balance
+		from `tabGL Entry`
+		where company = %(company)s and is_cancelled = 0
+		  and account in %(accounts)s and posting_date <= %(as_of)s
+		group by account
+		""",
+		{"company": company, "as_of": as_of, "accounts": tuple(accounts)},
+		as_dict=True,
+	)
+	return {r.account: flt(r.balance, 2) for r in rows}
 
 
 # ------------------------------------------------------------------ helpers

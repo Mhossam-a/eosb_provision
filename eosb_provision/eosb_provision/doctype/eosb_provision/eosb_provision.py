@@ -118,11 +118,35 @@ class EOSBProvision(Document):
 				+ "\n"
 				+ "\n".join(f"- {e} {names.get(e) or ''}: {reasons.get(e, '')}" for e in skipped)
 			)
+		if self.is_opening and not employees:
+			notes.append(self.opening_gl_note(rows, settings))
 		if update_notes:
 			self.notes = "\n".join(notes)
 		self.apply_booked()
 		self.set_totals()
 		return notes
+
+	def opening_gl_note(self, rows, settings):
+		"""مطابقة الافتتاحي مع رصيد حسابات المخصص الحالي في الـ GL (قبل ما تعمل Submit)."""
+		accounts = calc.get_provision_accounts(self.company, settings)
+		gl = flt(sum(calc.get_gl_account_balances(self.company, self.posting_date, accounts).values()), 2)
+		total = sum(flt(r.allocated_amount) for r in rows)
+		if calc.leave_mode(settings) == calc.LEAVE_POST:
+			total += sum(flt(r.total_leave_amount) for r in rows)
+		total = flt(total, 2)
+		diff = flt(gl - total, 2)
+		note = _("مطابقة الافتتاحي مع الـ GL: رصيد حسابات المخصص الحالي {0} · إجمالي الافتتاحي {1} · الفرق {2}").format(
+			f"{gl:,.2f}", f"{total:,.2f}", f"{diff:,.2f}"
+		)
+		if calc.opening_mode(settings) == calc.OPENING_POST:
+			note += "\n" + _(
+				"Opening Provision = Post entry: القيد هيتعمل بإجمالي الافتتاحي كله، فلو الرصيد القديم لسه في الـ GL اعكسه الأول وإلا هيتحسب مرتين"
+			)
+		elif diff:
+			note += "\n" + _(
+				"الفرق ده هيظهر في تقرير EOSB Provision Balance كـ «فرق الافتتاحي» لحد ما تقفله بقيد تسوية واحد"
+			)
+		return note
 
 	@staticmethod
 	def employee_row(r):
@@ -209,16 +233,20 @@ class EOSBProvision(Document):
 
 		settings = calc.get_settings()
 		leave_account = calc.get_company_accounts(settings, self.company).get("leave_provision_account")
+		# Calculate only: الإجازات بتظهر كقيمة بس، مفيش حساب ولا محجوز ولا تسوية (مفيش قيد)
+		post_leave = calc.leave_mode(settings) == calc.LEAVE_POST
 		self.flags.leave_previous_accounts = {}
 		for e in self.employees:
 			e.eosb_booked = flt(by_emp.get(e.employee, [0, 0])[0], 2)
 			e.eosb_adjustment = flt(by_emp.get(e.employee, [0, 0])[1], 2)
 			lb = leave_booked.get(e.employee) or frappe._dict()
 			e.leave_booked = flt(lb.get("amount"), 2)
-			e.leave_provision_account = leave_account if settings.include_leave_provision else None
+			e.leave_provision_account = leave_account if post_leave else None
 			if lb.get("account") and e.leave_provision_account and lb.account != e.leave_provision_account:
 				self.flags.leave_previous_accounts[e.employee] = lb.account
-			e.leave_adjustment = 0 if self.is_opening else flt(flt(e.total_leave_amount) - e.leave_booked, 2)
+			e.leave_adjustment = (
+				0 if (self.is_opening or not post_leave) else flt(flt(e.total_leave_amount) - e.leave_booked, 2)
+			)
 
 	# ------------------------------------------------------------ opening edits
 	def sync_opening_amounts(self):
@@ -261,7 +289,7 @@ class EOSBProvision(Document):
 		if not_done:
 			frappe.throw(_("الموظفين دول مااتحسبوش، اضغط Calculate: {0}").format(", ".join(not_done)))
 		self.validate_order()
-		if not self.is_opening:
+		if not self.is_opening or calc.opening_mode(calc.get_settings()) == calc.OPENING_POST:
 			# Accounts Frozen Till Date: نفس فحص ERPNext، قبل ما يتعمل القيد
 			# (v15: في Accounts Settings، v16: في الـ Company)
 			import inspect
@@ -283,9 +311,12 @@ class EOSBProvision(Document):
 
 	def on_submit(self):
 		if self.is_opening:
-			self.db_set("status", "Opening")
-			return
-		je = self.make_journal_entry()
+			if calc.opening_mode(calc.get_settings()) != calc.OPENING_POST:
+				self.db_set("status", "Opening")
+				return
+			je = self.make_opening_journal_entry()
+		else:
+			je = self.make_journal_entry()
 		if not je:
 			self.db_set("status", "No Adjustment")
 			return
@@ -368,7 +399,7 @@ class EOSBProvision(Document):
 			expense_totals[d.expense_account] = flt(expense_totals.get(d.expense_account, 0) + adj, 2)
 
 		# الإجازات
-		if settings.include_leave_provision:
+		if calc.leave_mode(settings) == calc.LEAVE_POST:
 			leave_prov = company_accounts.get("leave_provision_account")
 			leave_exp = company_accounts.get("leave_expense_account")
 			for e in self.employees:
@@ -401,15 +432,85 @@ class EOSBProvision(Document):
 
 		if not lines:
 			return None
+		return self.create_journal_entry(
+			lines,
+			settings,
+			_("مخصص نهاية الخدمة ورصيد الإجازات حتى {0} - {1}").format(
+				frappe.format(self.posting_date, "Date"), self.name
+			),
+		)
 
+	def make_opening_journal_entry(self):
+		"""Opening Provision = Post entry: دائن المخصص لكل موظف (مبلغ الافتتاحي كله)، ومدين Opening Counter Account.
+		لو الرصيد القديم لسه في الـ GL لازم يتعكس قبل كده، وإلا هيتحسب مرتين."""
+		settings = calc.get_settings()
+		company_accounts = calc.get_company_accounts(settings, self.company)
+		counter = company_accounts.get("opening_counter_account")
+		if not counter:
+			frappe.throw(
+				_("حط Opening Counter Account لشركة {0} في EOSB Provision Settings (جدول Company Accounts)").format(
+					self.company
+				)
+			)
+		cost_center = company_accounts.get("cost_center") or frappe.get_cached_value(
+			"Company", self.company, "cost_center"
+		)
+
+		credits = {}
+		for d in self.details:
+			if d.is_reversal or not flt(d.required_amount, 2):
+				continue
+			key = (d.employee, d.provision_account)
+			credits[key] = flt(credits.get(key, 0) + flt(d.required_amount), 2)
+		if calc.leave_mode(settings) == calc.LEAVE_POST:
+			leave_prov = company_accounts.get("leave_provision_account")
+			for e in self.employees:
+				if not flt(e.total_leave_amount, 2):
+					continue
+				if not leave_prov:
+					frappe.throw(
+						_("حط Leave Provision Account لشركة {0} في EOSB Provision Settings").format(self.company)
+					)
+				key = (e.employee, leave_prov)
+				credits[key] = flt(credits.get(key, 0) + flt(e.total_leave_amount), 2)
+
+		lines = []
+		for (employee, account), amount in credits.items():
+			row = {
+				"account": account,
+				"cost_center": cost_center,
+				"debit_in_account_currency": 0,
+				"credit_in_account_currency": amount,
+			}
+			if frappe.get_cached_value("Account", account, "account_type") in ("Payable", "Receivable"):
+				row.update({"party_type": "Employee", "party": employee})
+			lines.append(row)
+		total = flt(sum(credits.values()), 2)
+		if not total:
+			return None
+		lines.append(
+			{
+				"account": counter,
+				"cost_center": cost_center,
+				"debit_in_account_currency": total,
+				"credit_in_account_currency": 0,
+			}
+		)
+		return self.create_journal_entry(
+			lines,
+			settings,
+			_("رصيد افتتاحي لمخصص نهاية الخدمة ورصيد الإجازات حتى {0} - {1}").format(
+				frappe.format(self.posting_date, "Date"), self.name
+			),
+		)
+
+	def create_journal_entry(self, lines, settings, remark):
 		je = frappe.new_doc("Journal Entry")
 		je.voucher_type = "Journal Entry"
 		je.company = self.company
 		je.posting_date = self.posting_date
 		je.eosb_provision = self.name
-		je.user_remark = _("مخصص نهاية الخدمة ورصيد الإجازات حتى {0} - {1}").format(
-			frappe.format(self.posting_date, "Date"), self.name
-		)
+		je.user_remark = remark
 		for row in lines:
 			je.append("accounts", row)
 		je.flags.ignore_permissions = True

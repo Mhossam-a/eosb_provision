@@ -28,7 +28,7 @@ frappe.ui.form.on("EOSB Provision", {
 		if (frm.doc.is_opening && frm.doc.docstatus === 0) {
 			frm.dashboard.set_headline(
 				__(
-					"مخصص افتتاحي: مش هيتعمل قيد. ممكن تكتب الرصيد القديم الفعلي لكل موظف في EOSB Amount و Leave Amount قبل الـ Submit"
+					"مخصص افتتاحي: القيد حسب Opening Provision في الإعدادات (Record only = من غير قيد). ممكن تكتب الرصيد القديم الفعلي لكل موظف في EOSB Amount و Leave Amount قبل الـ Submit"
 				),
 				"orange"
 			);

@@ -17,8 +17,10 @@
   "days_in_month",
   "relieving_date_handling",
   "posting_section",
-  "include_leave_provision",
+  "leave_provision_mode",
+  "opening_mode",
   "submit_journal_entry",
+  "include_leave_provision",
   "company_accounts",
   "auto_section",
   "auto_create",
@@ -106,10 +108,28 @@
    "label": "Posting"
   },
   {
+   "fieldname": "leave_provision_mode",
+   "fieldtype": "Select",
+   "label": "Leave Balance Provision",
+   "options": "Disabled\nCalculate only\nCalculate and post",
+   "default": "Calculate and post",
+   "description": "Disabled: مفيش إجازات. Calculate only: رصيد الإجازات وقيمته بيظهروا في الشاشة والتقرير من غير قيد. Calculate and post: بيتحسبوا وبيدخلوا القيد (محتاج Leave Expense و Leave Provision Account)"
+  },
+  {
+   "fieldname": "opening_mode",
+   "fieldtype": "Select",
+   "label": "Opening Provision",
+   "options": "Record only\nPost entry",
+   "default": "Record only",
+   "description": "Record only: المخصص الافتتاحي بيسجل الرصيد لكل موظف من غير قيد (الرصيد القديم يفضل في الـ GL زي ما هو). Post entry: بيعمل قيد دائن المخصص ومدين Opening Counter Account (لازم الرصيد القديم يكون معكوس)"
+  },
+  {
    "fieldname": "include_leave_provision",
    "fieldtype": "Check",
-   "label": "Include Leave Balance Provision",
-   "default": "1"
+   "label": "Include Leave Balance Provision (legacy)",
+   "default": "1",
+   "hidden": 1,
+   "read_only": 1
   },
   {
    "fieldname": "submit_journal_entry",
@@ -146,7 +166,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-14 10:00:00.000000",
+ "modified": "2026-10-15 16:00:00.000000",
  "modified_by": "Administrator",
  "module": "EOSB Provision",
  "name": "EOSB Provision Settings",
